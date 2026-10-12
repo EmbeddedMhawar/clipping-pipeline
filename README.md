@@ -140,19 +140,26 @@ clipping-pipeline/
 ├── GLOSSARY.md                 # Project domain glossary
 ├── scripts/
 │   ├── clipping_state.py       # State engine CLI & pre-flight gate validator
+│   ├── clipping_channels.py    # Channel portfolio & warmup management engine
 │   └── ingest_guidelines.py    # Guidelines normalizer & review artifact generator
 ├── references/
-│   └── CAMPAIGN_BRIEF_SCHEMA.md# Normalized schema specification & JSON schema
+│   ├── CAMPAIGN_BRIEF_SCHEMA.md    # Normalized schema specification & JSON schema
+│   └── CHANNEL_PORTFOLIO_SCHEMA.md # Channel portfolio & warmup schema specification
 ├── skills/
 │   ├── clipping-pipeline/      # Master orchestrator router skill
 │   │   └── SKILL.md
-│   └── clipping-guidelines/    # Campaign ingestion & review gate skill
+│   ├── clipping-guidelines/    # Campaign ingestion & review gate skill
+│   │   └── SKILL.md
+│   └── clipping-channels/      # Channel portfolio & warmup management skill
 │       └── SKILL.md
 └── tests/
     ├── test_plugin_manifest.py # Plugin manifest test suite
     ├── test_clipping_state.py  # State engine CLI & pre-flight test suite
     ├── test_guidelines_skill.py# Guidelines ingestion & schema test suite
-    └── test_router_skill.py    # Master router skill test suite
+    ├── test_router_skill.py    # Master router skill test suite
+    ├── test_channels.py        # Channel portfolio CLI test suite
+    ├── test_channel_schema.py  # Channel schema validator test suite
+    └── test_channels_skill.py  # Channel companion skill test suite
 ```
 
 ---
