@@ -85,6 +85,24 @@ class TestPluginManifest(unittest.TestCase):
                 f"Required directory '{d}' is missing at {dir_path}",
             )
 
+    def test_skills_directories(self):
+        expected_skills = [
+            "clipping-pipeline",
+            "clipping-guidelines",
+            "clipping-channels",
+        ]
+        for skill in expected_skills:
+            skill_dir = self.repo_root / "skills" / skill
+            self.assertTrue(
+                skill_dir.is_dir(),
+                f"Required skill directory '{skill}' is missing at {skill_dir}",
+            )
+            skill_file = skill_dir / "SKILL.md"
+            self.assertTrue(
+                skill_file.is_file(),
+                f"Required SKILL.md missing in {skill_dir}",
+            )
+
     def test_readme_documentation(self):
         readme_path = self.repo_root / "README.md"
         self.assertTrue(readme_path.is_file(), "README.md is missing")
