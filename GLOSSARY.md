@@ -75,3 +75,25 @@ _Avoid_: Daily checklist, warmup routine, daily agenda
 **Device Transfer Protocol**:
 The configured mechanism (such as local QR code server, ADB push, Telegram dispatch, or cloud sync) used to deliver rendered clips directly to the creator's mobile device for manual posting.
 _Avoid_: File send, phone sync, video transfer
+
+**QC Packager**:
+The Step 7 skill (`clipping-qc-packager`) dedicated purely to audio/visual quality control (-14 LUFS loudness audit, caption closers check, metadata compliance) and Whop submission packaging.
+_Avoid_: QC manager, publishing manager, step 7 dispatcher
+
+**Publisher Skill**:
+The Step 8 skill (`clipping-publisher`) responsible for querying eligible channels, uploading directly to YouTube Shorts (via YouTube Data API v3 with BrowserOS Neo fallback), and transferring rendered clips to creator mobile devices for warmed-up Instagram and TikTok accounts.
+_Avoid_: Uploader bot, post sender, manual distributor
+
+**Warmed-Up Channel**:
+An account whose lifecycle stage allows active posting (`daily_post_limit > 0`—specifically `Seeding`, `Ramp-Up`, or `Mature`), and is not subject to an active `Account Cooldown`.
+_Avoid_: Seasoned account, ready channel, aged profile
+
+**Brand Cluster**:
+A group of channel accounts across different platforms (e.g. YouTube Shorts, TikTok, Instagram Reels) that share the same `account_name` and creator identity.
+_Avoid_: Channel family, account group, profile bundle
+
+**Cross-Platform Distribution**:
+Publishing a single approved video clip across different social platforms within the same brand cluster, while strictly prohibiting posting the identical clip to multiple channels on the same platform.
+_Avoid_: Multi-posting, duplicate broadcasting, spray-and-pray
+
+
