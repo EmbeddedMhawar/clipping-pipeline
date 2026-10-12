@@ -1,0 +1,3 @@
+# 0002: Health-Gated Channel Warmup Advancement
+
+Advancement through the 4-stage channel warmup lifecycle cannot rely solely on elapsed calendar days. Accounts on short-form platforms (particularly TikTok and Instagram) frequently face 0-view shadowbans due to IP reputation, rapid creation, or automated metadata patterns. Advancing an account to `Ramp-Up` without empirical view-count validation wastes high-value editing assets on suppressed accounts. Channels in `Seeding` must clear an explicit health gate (verifying views meet baseline algorithmic distribution without suppression) before high-volume posting is unlocked. If an account is suppressed, it is moved to `Account Cooldown` for 72 hours of non-posting algorithmic browsing.
