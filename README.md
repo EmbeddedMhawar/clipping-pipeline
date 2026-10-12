@@ -151,7 +151,8 @@ clipping-pipeline/
 └── tests/
     ├── test_plugin_manifest.py # Plugin manifest test suite
     ├── test_clipping_state.py  # State engine CLI & pre-flight test suite
-    └── test_guidelines_skill.py# Guidelines ingestion & schema test suite
+    ├── test_guidelines_skill.py# Guidelines ingestion & schema test suite
+    └── test_router_skill.py    # Master router skill test suite
 ```
 
 ---
