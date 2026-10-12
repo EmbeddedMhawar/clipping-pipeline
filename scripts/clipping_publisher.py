@@ -20,9 +20,26 @@ import os
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+class YouTubePublishError(Exception):
+    """Base exception for YouTube publishing failures."""
+    pass
+
+
+class YouTubeAuthError(YouTubePublishError):
+    """Raised when YouTube OAuth credentials are missing, expired, or invalid."""
+    pass
+
+
+class YouTubeQuotaError(YouTubePublishError):
+    """Raised when YouTube Data API quota is exceeded (quotaExceeded / HTTP 403)."""
+    pass
 
 CHANNELS_FILENAME = "channels.json"
 STATE_FILENAME = ".clipping_state.json"
@@ -309,11 +326,12 @@ def stage_channel_quota(
     project: Optional[str] = None,
     channels_path: Optional[Union[str, Path]] = None,
     timestamp: Optional[str] = None,
+    post_url: Optional[str] = None,
+    video_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Immediately increments posting_cadence.posts_today, updates last_post_date,
-    and appends a post entry to post_log with status 'staged_mobile' to preserve
-    warmup quotas.
+    and appends a post entry to post_log to preserve warmup quotas.
     Optionally persists updated portfolio to channels.json if channels_path is provided.
     Returns the modified channel dictionary.
     """
@@ -339,6 +357,10 @@ def stage_channel_quota(
     }
     if project:
         log_entry["project"] = project
+    if post_url:
+        log_entry["post_url"] = post_url
+    if video_id:
+        log_entry["video_id"] = video_id
 
     target_chan.setdefault("post_log", []).append(log_entry)
 
@@ -524,6 +546,482 @@ def check_youtube_token(channel: Dict[str, Any]) -> Tuple[bool, str, str]:
     return False, "missing", str(default_path)
 
 
+def refresh_youtube_token(
+    cred_data: Dict[str, Any],
+    token_uri: str = "https://oauth2.googleapis.com/token",
+) -> str:
+    """
+    Refreshes an OAuth 2.0 access token using a refresh token and client credentials.
+    Makes a POST request to Google OAuth2 token endpoint.
+    """
+    client_id = cred_data.get("client_id")
+    client_secret = cred_data.get("client_secret")
+    refresh_token = cred_data.get("refresh_token")
+
+    if not refresh_token:
+        raise YouTubeAuthError("Cannot refresh OAuth token: 'refresh_token' is missing")
+    if not client_id:
+        raise YouTubeAuthError("Cannot refresh OAuth token: 'client_id' is missing")
+
+    endpoint = cred_data.get("token_uri") or cred_data.get("token_url") or token_uri
+
+    payload = {
+        "grant_type": "refresh_token",
+        "client_id": client_id,
+        "refresh_token": refresh_token,
+    }
+    if client_secret:
+        payload["client_secret"] = client_secret
+
+    encoded_data = urllib.parse.urlencode(payload).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint,
+        data=encoded_data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            access_token = data.get("access_token")
+            if not access_token:
+                raise YouTubeAuthError("Refresh response missing 'access_token'")
+            return str(access_token)
+    except urllib.error.HTTPError as e:
+        err_msg = ""
+        try:
+            err_msg = e.read().decode("utf-8", errors="replace")
+        finally:
+            e.close()
+        raise YouTubeAuthError(f"OAuth token refresh failed with HTTP {e.code}: {err_msg}")
+    except Exception as e:
+        raise YouTubeAuthError(f"OAuth token refresh connection failed: {e}")
+
+
+def resolve_youtube_token(
+    channel: Dict[str, Any],
+    refresh_if_needed: bool = True,
+) -> Optional[str]:
+    """
+    Resolves YouTube OAuth access token for a channel:
+    1. Direct token in channel dictionary ('token' or 'access_token').
+    2. Credentials dict in channel dictionary ('credentials').
+    3. Custom credentials_path or token_path from channel metadata.
+    4. Default ~/.config/clipping-pipeline/youtube/<channel_id>_token.json.
+    5. Environment variable YOUTUBE_TOKEN_<CHAN_ID>, YOUTUBE_ACCESS_TOKEN, or YOUTUBE_TOKEN.
+
+    If credentials contain refresh_token and client_id, and access_token is missing,
+    it refreshes the token via Google OAuth2 token endpoint.
+
+    Returns access token string or None if credentials are missing.
+    """
+    # 1. Direct in channel dictionary
+    if channel.get("access_token"):
+        return str(channel["access_token"]).strip()
+    if channel.get("token"):
+        return str(channel["token"]).strip()
+
+    # 2. In credentials sub-dict
+    creds = channel.get("credentials")
+    if isinstance(creds, dict):
+        if creds.get("access_token"):
+            return str(creds["access_token"]).strip()
+        if creds.get("refresh_token") and creds.get("client_id") and refresh_if_needed:
+            return refresh_youtube_token(creds)
+
+    # 3 & 4. File-based credentials
+    chan_id = channel.get("id", "")
+    custom_path = channel.get("credentials_path") or channel.get("token_path")
+    candidate_paths: List[Path] = []
+    if custom_path:
+        candidate_paths.append(Path(custom_path).expanduser().resolve())
+
+    default_path = (
+        Path.home()
+        / ".config"
+        / "clipping-pipeline"
+        / "youtube"
+        / f"{chan_id}_token.json"
+    )
+    candidate_paths.append(default_path)
+
+    for p in candidate_paths:
+        if p.is_file():
+            try:
+                content = p.read_text(encoding="utf-8").strip()
+                if content.startswith("{"):
+                    data = json.loads(content)
+                    if data.get("access_token"):
+                        return str(data["access_token"]).strip()
+                    if data.get("refresh_token") and data.get("client_id") and refresh_if_needed:
+                        return refresh_youtube_token(data)
+                elif content:
+                    return content
+            except YouTubeAuthError:
+                raise
+            except Exception as e:
+                sys.stderr.write(f"Warning reading credentials at {p}: {e}\n")
+
+    # 5. Environment variables
+    env_keys = [
+        f"YOUTUBE_TOKEN_{chan_id.upper().replace('-', '_')}",
+        "YOUTUBE_ACCESS_TOKEN",
+        "YOUTUBE_TOKEN",
+    ]
+    for env_k in env_keys:
+        val = os.environ.get(env_k)
+        if val:
+            val = val.strip()
+            if val.startswith("{"):
+                try:
+                    data = json.loads(val)
+                    if data.get("access_token"):
+                        return str(data["access_token"]).strip()
+                    if data.get("refresh_token") and data.get("client_id") and refresh_if_needed:
+                        return refresh_youtube_token(data)
+                except YouTubeAuthError:
+                    raise
+                except Exception:
+                    pass
+            elif val:
+                return val
+
+    return None
+
+
+VALID_PRIVACY_STATUSES = ("public", "unlisted", "private")
+
+
+def trigger_browseros_neo_youtube(
+    channel: Dict[str, Any],
+    video_path: Union[str, Path],
+    title: str,
+    description: str = "",
+    reason: str = "missing_credentials",
+    privacy_status: str = "public",
+    clip_id: Optional[str] = None,
+    project: Optional[str] = None,
+    channels_path: Optional[Union[str, Path]] = None,
+    portfolio: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Fallback orchestrator that formats BrowserOS Neo studio automation plan/payload
+    targeting YouTube Studio (https://studio.youtube.com), stages upload payload,
+    and returns fallback execution descriptor.
+    """
+    v_path = Path(video_path).resolve()
+    actual_clip_id = clip_id or v_path.stem
+    priv_norm = str(privacy_status).strip().lower()
+    chan_id = channel.get("id", "yt-chan")
+
+    staging_dir = v_path.parent / "browseros_staging" if v_path.parent.exists() else Path.cwd() / "browseros_staging"
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    payload_file = staging_dir / f"browseros_upload_{chan_id}.json"
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    session_label = f"youtube-upload-{chan_id}"
+
+    automation_plan = [
+        "1. Open tab in BrowserOS Neo at https://studio.youtube.com",
+        "2. Click 'CREATE' -> 'Upload videos'",
+        f"3. Select video file: {v_path}",
+        f"4. Set title: {title}",
+        f"5. Set description: {description}",
+        f"6. Select visibility: {priv_norm}",
+        "7. Complete checks and publish Shorts video",
+    ]
+
+    staged_payload = {
+        "channel_id": chan_id,
+        "handle": channel.get("handle"),
+        "platform": "YouTube Shorts",
+        "video_path": str(v_path),
+        "title": title,
+        "description": description,
+        "privacy_status": priv_norm,
+        "fallback_reason": reason,
+        "target_url": "https://studio.youtube.com",
+        "staged_at": now_iso,
+        "automation_plan": automation_plan,
+        "browseros_session": {
+            "name": session_label,
+            "category": "publishing",
+            "url": "https://studio.youtube.com",
+        },
+    }
+    payload_file.write_text(json.dumps(staged_payload, indent=2), encoding="utf-8")
+
+    if channels_path:
+        target_portfolio = portfolio or load_portfolio(channels_path)
+        stage_channel_quota(
+            portfolio=target_portfolio,
+            channel_id=chan_id,
+            clip_id=actual_clip_id,
+            status="staged_browseros_neo",
+            project=project,
+            channels_path=channels_path,
+            post_url="https://studio.youtube.com",
+            video_id=None,
+        )
+
+    return {
+        "status": "fallback_browseros_neo",
+        "platform": "YouTube Shorts",
+        "channel_id": chan_id,
+        "handle": channel.get("handle"),
+        "method": "browseros_neo",
+        "target_url": "https://studio.youtube.com",
+        "post_url": "https://studio.youtube.com",
+        "video_id": None,
+        "video_path": str(v_path),
+        "title": title,
+        "description": description,
+        "privacy_status": priv_norm,
+        "reason": reason,
+        "automation_plan": automation_plan,
+        "staged_payload": str(payload_file),
+        "session_label": session_label,
+    }
+
+
+def upload_youtube_shorts(
+    channel: Dict[str, Any],
+    video_path: Union[str, Path],
+    title: str,
+    description: str = "",
+    privacy_status: str = "public",
+    clip_id: Optional[str] = None,
+    project: Optional[str] = None,
+    channels_path: Optional[Union[str, Path]] = None,
+    portfolio: Optional[Dict[str, Any]] = None,
+    fallback_on_error: bool = True,
+    token: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Performs YouTube Data API v3 upload using OAuth access token resolved from credentials.
+    Defaults to public visibility, accepting unlisted or private overrides.
+    Automatically triggers BrowserOS Neo fallback upon missing credentials,
+    auth errors, or quotaExceeded (HTTP 403).
+    """
+    priv_norm = str(privacy_status).strip().lower()
+    if priv_norm not in VALID_PRIVACY_STATUSES:
+        raise ValueError(
+            f"Invalid privacy status '{privacy_status}'. Must be one of: {', '.join(VALID_PRIVACY_STATUSES)}"
+        )
+
+    v_path = Path(video_path).resolve()
+    if not v_path.is_file():
+        raise FileNotFoundError(f"Video file not found at {v_path}")
+
+    resolved_token = token
+    if not resolved_token:
+        try:
+            resolved_token = resolve_youtube_token(channel)
+        except Exception as e:
+            if fallback_on_error:
+                return trigger_browseros_neo_youtube(
+                    channel=channel,
+                    video_path=v_path,
+                    title=title,
+                    description=description,
+                    reason=f"Token resolution error: {e}",
+                    privacy_status=priv_norm,
+                    clip_id=clip_id,
+                    project=project,
+                    channels_path=channels_path,
+                    portfolio=portfolio,
+                )
+            raise
+
+    if not resolved_token:
+        if fallback_on_error:
+            return trigger_browseros_neo_youtube(
+                channel=channel,
+                video_path=v_path,
+                title=title,
+                description=description,
+                reason="missing_credentials",
+                privacy_status=priv_norm,
+                clip_id=clip_id,
+                project=project,
+                channels_path=channels_path,
+                portfolio=portfolio,
+            )
+        raise YouTubeAuthError(f"Missing YouTube OAuth credentials for channel '{channel.get('id')}'")
+
+    url = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status"
+    metadata = {
+        "snippet": {
+            "title": title,
+            "description": description,
+            "categoryId": "22",
+        },
+        "status": {
+            "privacyStatus": priv_norm,
+            "selfDeclaredMadeForKids": False,
+        },
+    }
+
+    boundary = f"===============clipping_{int(datetime.now(timezone.utc).timestamp())}==============="
+    delimiter = f"\r\n--{boundary}\r\n".encode("utf-8")
+    close_delim = f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+    meta_part = (
+        b"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+        + json.dumps(metadata, ensure_ascii=False).encode("utf-8")
+    )
+
+    video_data = v_path.read_bytes()
+    video_part = (
+        b"Content-Type: video/mp4\r\n\r\n"
+        + video_data
+    )
+
+    body = b"".join([
+        b"--" + boundary.encode("utf-8") + b"\r\n",
+        meta_part,
+        delimiter,
+        video_part,
+        close_delim,
+    ])
+
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "Authorization": f"Bearer {resolved_token}",
+            "Content-Type": f"multipart/related; boundary={boundary}",
+            "Content-Length": str(len(body)),
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req) as resp:
+            resp_data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode("utf-8", errors="replace")
+            parsed_err = json.loads(err_body)
+            err_obj = parsed_err.get("error", {})
+            err_msg = err_obj.get("message", "")
+            reasons = [item.get("reason", "") for item in err_obj.get("errors", [])]
+        except Exception:
+            err_msg = str(e)
+            reasons = []
+        finally:
+            e.close()
+
+        is_quota = (
+            e.code == 403
+            and ("quotaExceeded" in reasons or "quota" in err_msg.lower() or "quotaexceeded" in err_body.lower())
+        )
+        is_auth = (
+            e.code == 401
+            or "invalidCredentials" in reasons
+            or "authError" in reasons
+        )
+
+        if is_quota:
+            reason_msg = f"quotaExceeded: YouTube Data API daily quota exhausted ({err_msg or 'HTTP 403'})"
+            if fallback_on_error:
+                return trigger_browseros_neo_youtube(
+                    channel=channel,
+                    video_path=v_path,
+                    title=title,
+                    description=description,
+                    reason=reason_msg,
+                    privacy_status=priv_norm,
+                    clip_id=clip_id,
+                    project=project,
+                    channels_path=channels_path,
+                    portfolio=portfolio,
+                )
+            raise YouTubeQuotaError(reason_msg)
+
+        if is_auth:
+            reason_msg = f"authError: YouTube OAuth token invalid or expired ({err_msg or 'HTTP 401'})"
+            if fallback_on_error:
+                return trigger_browseros_neo_youtube(
+                    channel=channel,
+                    video_path=v_path,
+                    title=title,
+                    description=description,
+                    reason=reason_msg,
+                    privacy_status=priv_norm,
+                    clip_id=clip_id,
+                    project=project,
+                    channels_path=channels_path,
+                    portfolio=portfolio,
+                )
+            raise YouTubeAuthError(reason_msg)
+
+        if fallback_on_error:
+            reason_msg = f"HTTP {e.code}: {err_msg}"
+            return trigger_browseros_neo_youtube(
+                channel=channel,
+                video_path=v_path,
+                title=title,
+                description=description,
+                reason=reason_msg,
+                privacy_status=priv_norm,
+                clip_id=clip_id,
+                project=project,
+                channels_path=channels_path,
+                portfolio=portfolio,
+            )
+        raise YouTubePublishError(f"YouTube upload failed with HTTP {e.code}: {err_msg}")
+
+    except Exception as e:
+        if fallback_on_error:
+            return trigger_browseros_neo_youtube(
+                channel=channel,
+                video_path=v_path,
+                title=title,
+                description=description,
+                reason=f"Upload error: {e}",
+                privacy_status=priv_norm,
+                clip_id=clip_id,
+                project=project,
+                channels_path=channels_path,
+                portfolio=portfolio,
+            )
+        raise
+
+    video_id = resp_data.get("id") or "unknown_id"
+    post_url = f"https://youtube.com/shorts/{video_id}"
+
+    if channels_path:
+        target_portfolio = portfolio or load_portfolio(channels_path)
+        actual_clip_id = clip_id or v_path.stem
+        stage_channel_quota(
+            portfolio=target_portfolio,
+            channel_id=channel["id"],
+            clip_id=actual_clip_id,
+            status="published",
+            project=project,
+            channels_path=channels_path,
+            post_url=post_url,
+            video_id=video_id,
+        )
+
+    return {
+        "status": "published",
+        "platform": "YouTube Shorts",
+        "channel_id": channel.get("id"),
+        "handle": channel.get("handle"),
+        "method": "direct_api",
+        "video_id": video_id,
+        "post_url": post_url,
+        "privacy_status": priv_norm,
+        "title": title,
+        "clip_id": clip_id or v_path.stem,
+        "response": resp_data,
+    }
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     channels_path = resolve_channels_path(args.project_dir, args.channels)
     if not channels_path or not channels_path.is_file():
@@ -600,13 +1098,15 @@ def publish_clip(
     hashtags: Optional[Union[str, List[str]]] = None,
     caption_closer: Optional[str] = None,
     caption_file: Optional[Union[str, Path]] = None,
+    privacy_status: str = "public",
     dry_run: bool = False,
     project: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Executes or simulates multi-platform publishing for a clip across brand cluster channels.
-    Delivers rendered video and bundled caption.txt to mobile channels (TikTok, Instagram Reels)
-    and stages daily posting quotas in channels.json.
+    Delivers rendered video and bundled caption.txt to mobile channels (TikTok, Instagram Reels),
+    executes YouTube Shorts upload (with BrowserOS Neo fallback), and stages daily posting quotas
+    in channels.json.
     """
     p_path = Path(channels_path).resolve()
     portfolio = load_portfolio(p_path)
@@ -674,13 +1174,13 @@ def publish_clip(
         if not dry_run and not v_path.is_file():
             raise FileNotFoundError(f"Video file not found at {v_path}")
     elif not dry_run:
-        mobile_allocated = [
+        channels_needing_video = [
             c
             for c in allocated.values()
-            if normalize_platform(c.get("platform", "")) in ("TikTok", "Instagram Reels")
+            if normalize_platform(c.get("platform", "")) in ("TikTok", "Instagram Reels", "YouTube Shorts")
         ]
-        if mobile_allocated:
-            raise ValueError("Video file required for publishing to mobile channels")
+        if channels_needing_video:
+            raise ValueError("Video file required for publishing")
 
     caption_content = ""
     c_path: Optional[Path] = None
@@ -745,16 +1245,41 @@ def publish_clip(
             publication_manifest.append(entry)
 
         elif plat == "YouTube Shorts":
-            entry = {
-                "status": "pending_upload" if not dry_run else "simulated",
-                "platform": plat,
-                "channel_id": chan.get("id"),
-                "handle": chan.get("handle"),
-                "note": "YouTube Shorts publishing engine deferred to Ticket #19",
-            }
-            publication_manifest.append(entry)
+            if dry_run:
+                has_token, tok_status, _ = check_youtube_token(chan)
+                entry = {
+                    "status": "simulated",
+                    "platform": plat,
+                    "channel_id": chan.get("id"),
+                    "handle": chan.get("handle"),
+                    "token_status": tok_status,
+                    "privacy_status": privacy_status,
+                    "post_url": "https://youtube.com/shorts/simulated" if has_token else "https://studio.youtube.com",
+                }
+                publication_manifest.append(entry)
+            else:
+                yt_res = upload_youtube_shorts(
+                    channel=chan,
+                    video_path=v_path,
+                    title=caption_hook or actual_clip_id,
+                    description=caption_content,
+                    privacy_status=privacy_status,
+                    clip_id=actual_clip_id,
+                    project=project,
+                    channels_path=p_path,
+                    portfolio=portfolio,
+                    fallback_on_error=True,
+                )
+                publication_manifest.append(yt_res)
 
-    overall_status = "allocated" if dry_run else "staged_mobile"
+    if dry_run:
+        overall_status = "allocated"
+    elif any(entry.get("platform") in ("TikTok", "Instagram Reels") for entry in publication_manifest):
+        overall_status = "staged_mobile"
+    elif any(entry.get("status") in ("fallback_browseros_neo", "staged_browseros_neo") for entry in publication_manifest):
+        overall_status = "staged_browseros_neo"
+    else:
+        overall_status = "published"
 
     return {
         "status": overall_status,
@@ -792,6 +1317,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
             hashtags=args.hashtags,
             caption_closer=args.caption_closer,
             caption_file=args.caption_file,
+            privacy_status=getattr(args, "privacy_status", "public"),
             dry_run=args.dry_run,
             project=getattr(args, "project", None),
         )
@@ -916,6 +1442,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_pub.add_argument("--hashtags", default=None, help="Comma-separated or space-separated hashtags")
     p_pub.add_argument("--caption-closer", default=None, help="Approved campaign closer CTA for companion caption")
     p_pub.add_argument("--caption-file", default=None, help="Path to existing caption text file")
+    p_pub.add_argument("--privacy-status", choices=["public", "unlisted", "private"], default="public", help="YouTube Shorts privacy visibility status (default: public)")
     p_pub.add_argument("--project", default=None, help="Campaign or project slug")
     p_pub.add_argument("--dry-run", action="store_true", help="Validate allocation without executing transfers")
     p_pub.add_argument("--json", action="store_true", help="Output JSON format")

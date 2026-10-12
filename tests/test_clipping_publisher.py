@@ -1156,5 +1156,527 @@ class TestClippingPublisherSlice8PublishIntegration(unittest.TestCase):
         self.assertTrue(Path(res["caption_file"]).is_file())
 
 
+class TestClippingPublisherSlice9YouTubeTokenResolution(unittest.TestCase):
+    """Slice 9: YouTube OAuth token resolution and refreshing."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="test_yt_tokens_")
+        self.config_dir = Path(self.tmpdir) / ".config" / "clipping-pipeline" / "youtube"
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_resolve_token_from_channel_metadata_access_token(self):
+        """Verifies resolve_youtube_token extracts access_token directly from channel metadata."""
+        import clipping_publisher
+
+        channel = {
+            "id": "chan-yt-meta",
+            "platform": "YouTube Shorts",
+            "access_token": "ya29.direct_meta_token",
+        }
+        token = clipping_publisher.resolve_youtube_token(channel)
+        self.assertEqual(token, "ya29.direct_meta_token")
+
+    def test_resolve_token_from_channel_credentials_dict(self):
+        """Verifies resolve_youtube_token extracts access_token from channel credentials dict."""
+        import clipping_publisher
+
+        channel = {
+            "id": "chan-yt-cred",
+            "platform": "YouTube Shorts",
+            "credentials": {
+                "access_token": "ya29.cred_dict_token",
+            },
+        }
+        token = clipping_publisher.resolve_youtube_token(channel)
+        self.assertEqual(token, "ya29.cred_dict_token")
+
+    def test_resolve_token_from_custom_credentials_file(self):
+        """Verifies resolve_youtube_token reads token from custom credentials_path file."""
+        import clipping_publisher
+
+        cred_file = Path(self.tmpdir) / "custom_token.json"
+        cred_file.write_text(json.dumps({"access_token": "ya29.file_token"}), encoding="utf-8")
+
+        channel = {
+            "id": "chan-yt-custom-file",
+            "platform": "YouTube Shorts",
+            "credentials_path": str(cred_file),
+        }
+        token = clipping_publisher.resolve_youtube_token(channel)
+        self.assertEqual(token, "ya29.file_token")
+
+    def test_resolve_token_from_default_config_path(self):
+        """Verifies resolve_youtube_token locates ~/.config/clipping-pipeline/youtube/<channel_id>_token.json."""
+        import clipping_publisher
+        from unittest.mock import patch
+
+        default_token_file = self.config_dir / "chan-yt-default_token.json"
+        default_token_file.write_text(json.dumps({"access_token": "ya29.default_config_token"}), encoding="utf-8")
+
+        channel = {
+            "id": "chan-yt-default",
+            "platform": "YouTube Shorts",
+        }
+        with patch("pathlib.Path.home", return_value=Path(self.tmpdir)):
+            token = clipping_publisher.resolve_youtube_token(channel)
+            self.assertEqual(token, "ya29.default_config_token")
+
+    def test_resolve_token_from_environment_variable(self):
+        """Verifies resolve_youtube_token reads YOUTUBE_TOKEN_<CHAN_ID> env var."""
+        import clipping_publisher
+        from unittest.mock import patch
+
+        channel = {
+            "id": "chan-yt-env-01",
+            "platform": "YouTube Shorts",
+        }
+        with patch.dict(os.environ, {"YOUTUBE_TOKEN_CHAN_YT_ENV_01": "ya29.env_token"}):
+            token = clipping_publisher.resolve_youtube_token(channel)
+            self.assertEqual(token, "ya29.env_token")
+
+    def test_resolve_token_refreshes_via_oauth2_token_endpoint(self):
+        """Verifies resolve_youtube_token calls Google OAuth2 token endpoint when refresh_token is present."""
+        import clipping_publisher
+        from unittest.mock import MagicMock, patch
+
+        cred_file = Path(self.tmpdir) / "refresh_token.json"
+        cred_data = {
+            "client_id": "test-client-id.apps.googleusercontent.com",
+            "client_secret": "test-secret",
+            "refresh_token": "1//refresh_token_abc",
+        }
+        cred_file.write_text(json.dumps(cred_data), encoding="utf-8")
+
+        channel = {
+            "id": "chan-yt-refresh",
+            "platform": "YouTube Shorts",
+            "credentials_path": str(cred_file),
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({
+            "access_token": "ya29.refreshed_access_token",
+            "expires_in": 3600,
+            "token_type": "Bearer",
+        }).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+            token = clipping_publisher.resolve_youtube_token(channel)
+            self.assertEqual(token, "ya29.refreshed_access_token")
+            self.assertTrue(mock_urlopen.called)
+            req = mock_urlopen.call_args[0][0]
+            self.assertEqual(req.full_url, "https://oauth2.googleapis.com/token")
+
+    def test_resolve_token_missing_returns_none(self):
+        """Verifies resolve_youtube_token returns None when no credentials exist."""
+        import clipping_publisher
+        from unittest.mock import patch
+
+        channel = {
+            "id": "chan-yt-nonexistent",
+            "platform": "YouTube Shorts",
+        }
+        with patch("pathlib.Path.home", return_value=Path(self.tmpdir)):
+            token = clipping_publisher.resolve_youtube_token(channel)
+            self.assertIsNone(token)
+
+
+class TestClippingPublisherSlice10YouTubeApiUpload(unittest.TestCase):
+    """Slice 10: Direct upload to YouTube Shorts via YouTube Data API v3."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="test_yt_upload_")
+        self.video_path = Path(self.tmpdir) / "short.mp4"
+        self.video_path.write_bytes(b"\x00\x00\x00\x1cftypmp42video_content")
+        self.channel = {
+            "id": "chan-yt-01",
+            "platform": "YouTube Shorts",
+            "handle": "@CuriousYT",
+            "access_token": "ya29.valid_test_token",
+        }
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_upload_youtube_shorts_api_success(self):
+        """Verifies upload_youtube_shorts performs multipart API upload and returns video ID and URL."""
+        import clipping_publisher
+        from unittest.mock import MagicMock, patch
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({
+            "id": "yt_short_123",
+            "snippet": {"title": "Viral Hook"},
+            "status": {"privacyStatus": "public"},
+        }).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+            res = clipping_publisher.upload_youtube_shorts(
+                channel=self.channel,
+                video_path=self.video_path,
+                title="Viral Hook",
+                description="Best clip ever #shorts",
+                privacy_status="public",
+            )
+
+            self.assertEqual(res["status"], "published")
+            self.assertEqual(res["video_id"], "yt_short_123")
+            self.assertEqual(res["post_url"], "https://youtube.com/shorts/yt_short_123")
+            self.assertEqual(res["privacy_status"], "public")
+            self.assertEqual(res["channel_id"], "chan-yt-01")
+
+            self.assertTrue(mock_urlopen.called)
+            req = mock_urlopen.call_args[0][0]
+            self.assertIn("https://www.googleapis.com/upload/youtube/v3/videos", req.full_url)
+            self.assertEqual(req.headers.get("Authorization"), "Bearer ya29.valid_test_token")
+            self.assertTrue(req.headers.get("Content-type", "").startswith("multipart/related; boundary="))
+            self.assertIn(b"Viral Hook", req.data)
+            self.assertIn(b"Best clip ever #shorts", req.data)
+            self.assertIn(b"video_content", req.data)
+
+    def test_upload_youtube_shorts_privacy_override(self):
+        """Verifies upload_youtube_shorts accepts unlisted and private overrides."""
+        import clipping_publisher
+        from unittest.mock import MagicMock, patch
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({
+            "id": "yt_priv_456",
+            "snippet": {"title": "Private Clip"},
+            "status": {"privacyStatus": "unlisted"},
+        }).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+            res = clipping_publisher.upload_youtube_shorts(
+                channel=self.channel,
+                video_path=self.video_path,
+                title="Private Clip",
+                description="Unlisted preview",
+                privacy_status="unlisted",
+            )
+
+            self.assertEqual(res["privacy_status"], "unlisted")
+            req = mock_urlopen.call_args[0][0]
+            self.assertIn(b'"privacyStatus": "unlisted"', req.data)
+
+    def test_upload_youtube_shorts_invalid_privacy_status_raises(self):
+        """Verifies upload_youtube_shorts raises ValueError on invalid privacy status."""
+        import clipping_publisher
+
+        with self.assertRaises(ValueError) as ctx:
+            clipping_publisher.upload_youtube_shorts(
+                channel=self.channel,
+                video_path=self.video_path,
+                title="Bad Status",
+                privacy_status="secret",
+            )
+        self.assertIn("privacy status", str(ctx.exception).lower())
+
+    def test_upload_youtube_shorts_missing_video_raises(self):
+        """Verifies upload_youtube_shorts raises FileNotFoundError when video file does not exist."""
+        import clipping_publisher
+
+        with self.assertRaises(FileNotFoundError):
+            clipping_publisher.upload_youtube_shorts(
+                channel=self.channel,
+                video_path=Path(self.tmpdir) / "nonexistent.mp4",
+                title="Missing Video",
+            )
+
+
+class TestClippingPublisherSlice11BrowserOSNeoFallback(unittest.TestCase):
+    """Slice 11: Automated BrowserOS Neo fallback on missing credentials, auth errors, and quota exhaustion."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="test_yt_fallback_")
+        self.video_path = Path(self.tmpdir) / "short.mp4"
+        self.video_path.write_bytes(b"\x00\x00\x00\x1cftypmp42video_payload")
+        self.channel = {
+            "id": "chan-yt-02",
+            "platform": "YouTube Shorts",
+            "handle": "@CuriousYT2",
+        }
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_trigger_browseros_neo_youtube_formats_plan_and_payload(self):
+        """Verifies trigger_browseros_neo_youtube formats plan and stages payload targeting YouTube Studio."""
+        import clipping_publisher
+
+        res = clipping_publisher.trigger_browseros_neo_youtube(
+            channel=self.channel,
+            video_path=self.video_path,
+            title="Studio Automation Clip",
+            description="Testing fallback #shorts",
+            reason="missing_credentials",
+            privacy_status="unlisted",
+        )
+
+        self.assertEqual(res["status"], "fallback_browseros_neo")
+        self.assertEqual(res["target_url"], "https://studio.youtube.com")
+        self.assertEqual(res["post_url"], "https://studio.youtube.com")
+        self.assertEqual(res["privacy_status"], "unlisted")
+        self.assertEqual(res["channel_id"], "chan-yt-02")
+        self.assertTrue(len(res["automation_plan"]) >= 5)
+
+        # Verify staged payload file exists and has correct content
+        payload_file = Path(res["staged_payload"])
+        self.assertTrue(payload_file.is_file())
+        staged_data = json.loads(payload_file.read_text(encoding="utf-8"))
+        self.assertEqual(staged_data["channel_id"], "chan-yt-02")
+        self.assertEqual(staged_data["title"], "Studio Automation Clip")
+        self.assertEqual(staged_data["target_url"], "https://studio.youtube.com")
+
+    def test_upload_fallback_on_missing_credentials(self):
+        """Verifies upload_youtube_shorts automatically triggers BrowserOS Neo fallback when credentials are missing."""
+        import clipping_publisher
+        from unittest.mock import patch
+
+        with patch("clipping_publisher.resolve_youtube_token", return_value=None):
+            res = clipping_publisher.upload_youtube_shorts(
+                channel=self.channel,
+                video_path=self.video_path,
+                title="Missing Token Clip",
+                description="Desc",
+                fallback_on_error=True,
+            )
+
+        self.assertEqual(res["status"], "fallback_browseros_neo")
+        self.assertEqual(res["method"], "browseros_neo")
+        self.assertIn("credentials", res["reason"].lower())
+        self.assertEqual(res["post_url"], "https://studio.youtube.com")
+
+    def test_upload_fallback_on_auth_error_http_401(self):
+        """Verifies upload_youtube_shorts automatically triggers fallback on HTTP 401 auth error."""
+        import clipping_publisher
+        from io import BytesIO
+        import urllib.error
+        from unittest.mock import patch
+
+        chan = dict(self.channel, access_token="ya29.bad_token")
+        err_fp = BytesIO(b'{"error": {"code": 401, "message": "Invalid Credentials", "errors": [{"reason": "authError"}]}}')
+        http_err = urllib.error.HTTPError(
+            url="https://www.googleapis.com/upload/youtube/v3/videos",
+            code=401,
+            msg="Unauthorized",
+            hdrs={},
+            fp=err_fp,
+        )
+
+        with patch("urllib.request.urlopen", side_effect=http_err):
+            res = clipping_publisher.upload_youtube_shorts(
+                channel=chan,
+                video_path=self.video_path,
+                title="Expired Token Clip",
+                fallback_on_error=True,
+            )
+
+        self.assertEqual(res["status"], "fallback_browseros_neo")
+        self.assertIn("autherror", res["reason"].lower())
+        self.assertEqual(res["post_url"], "https://studio.youtube.com")
+
+    def test_upload_fallback_on_quota_exceeded_http_403(self):
+        """Verifies upload_youtube_shorts automatically triggers fallback on HTTP 403 quotaExceeded."""
+        import clipping_publisher
+        from io import BytesIO
+        import urllib.error
+        from unittest.mock import patch
+
+        chan = dict(self.channel, access_token="ya29.valid_token_but_quota_out")
+        err_fp = BytesIO(b'{"error": {"code": 403, "message": "The request cannot be completed because you have exceeded your quota.", "errors": [{"reason": "quotaExceeded"}]}}')
+        http_err = urllib.error.HTTPError(
+            url="https://www.googleapis.com/upload/youtube/v3/videos",
+            code=403,
+            msg="Forbidden",
+            hdrs={},
+            fp=err_fp,
+        )
+
+        with patch("urllib.request.urlopen", side_effect=http_err):
+            res = clipping_publisher.upload_youtube_shorts(
+                channel=chan,
+                video_path=self.video_path,
+                title="Quota Out Clip",
+                fallback_on_error=True,
+            )
+
+        self.assertEqual(res["status"], "fallback_browseros_neo")
+        self.assertIn("quotaexceeded", res["reason"].lower())
+        self.assertEqual(res["post_url"], "https://studio.youtube.com")
+
+    def test_upload_raises_when_fallback_disabled(self):
+        """Verifies upload_youtube_shorts raises typed exceptions when fallback_on_error is False."""
+        import clipping_publisher
+        from io import BytesIO
+        import urllib.error
+        from unittest.mock import patch
+
+        chan = dict(self.channel, access_token="ya29.test_token")
+        err_fp = BytesIO(b'{"error": {"code": 403, "message": "Quota exceeded", "errors": [{"reason": "quotaExceeded"}]}}')
+        http_err = urllib.error.HTTPError(
+            url="https://www.googleapis.com/upload/youtube/v3/videos",
+            code=403,
+            msg="Forbidden",
+            hdrs={},
+            fp=err_fp,
+        )
+
+        with patch("urllib.request.urlopen", side_effect=http_err):
+            with self.assertRaises(clipping_publisher.YouTubeQuotaError):
+                clipping_publisher.upload_youtube_shorts(
+                    channel=chan,
+                    video_path=self.video_path,
+                    title="Quota Error No Fallback",
+                    fallback_on_error=False,
+                )
+
+
+class TestClippingPublisherSlice12YouTubePortfolioLoggingAndCli(unittest.TestCase):
+    """Slice 12: End-to-end integration: channels.json quota logging and CLI publish."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="test_yt_cli_")
+        self.channels_path = Path(self.tmpdir) / "channels.json"
+        self.video_path = Path(self.tmpdir) / "test_clip.mp4"
+        self.video_path.write_bytes(b"\x00\x00\x00\x1cftypmp42video_bytes_here")
+
+        self.portfolio_data = {
+            "version": "1.0.0",
+            "workspace_id": "test-yt-cli",
+            "channels": [
+                {
+                    "id": "chan-yt-cli-01",
+                    "platform": "YouTube Shorts",
+                    "handle": "@YTShortsCli",
+                    "account_name": "Cli Brand",
+                    "stage": "Mature",
+                    "status": "active",
+                    "posting_cadence": {
+                        "daily_post_limit": 4,
+                        "posts_today": 0,
+                    },
+                    "access_token": "ya29.valid_cli_token",
+                    "post_log": [],
+                },
+                {
+                    "id": "chan-yt-cli-fallback",
+                    "platform": "YouTube Shorts",
+                    "handle": "@YTRestricted",
+                    "account_name": "Fallback Brand",
+                    "stage": "Mature",
+                    "status": "active",
+                    "posting_cadence": {
+                        "daily_post_limit": 4,
+                        "posts_today": 0,
+                    },
+                    "post_log": [],
+                },
+            ],
+        }
+        self.channels_path.write_text(json.dumps(self.portfolio_data, indent=2), encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def run_cli(self, args: List[str]) -> subprocess.CompletedProcess:
+        cmd = [sys.executable, str(SCRIPT_PATH)] + args
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+    def test_youtube_upload_logs_to_channels_json(self):
+        """Verifies successful upload logs video ID, post URL, and increments posts_today in channels.json."""
+        import clipping_publisher
+        from unittest.mock import MagicMock, patch
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({
+            "id": "yt_success_789",
+            "snippet": {"title": "Logged Clip"},
+            "status": {"privacyStatus": "public"},
+        }).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            res = clipping_publisher.publish_clip(
+                channels_path=self.channels_path,
+                video_path=self.video_path,
+                brand_cluster="Cli Brand",
+                clip_id="clip-logged-01",
+                caption_hook="Logged Hook",
+                dry_run=False,
+            )
+
+        self.assertEqual(res["status"], "published")
+        self.assertEqual(len(res["publication_manifest"]), 1)
+        entry = res["publication_manifest"][0]
+        self.assertEqual(entry["video_id"], "yt_success_789")
+        self.assertEqual(entry["post_url"], "https://youtube.com/shorts/yt_success_789")
+
+        # Verify channels.json updated on disk
+        updated_data = json.loads(self.channels_path.read_text(encoding="utf-8"))
+        chan = next(c for c in updated_data["channels"] if c["id"] == "chan-yt-cli-01")
+        self.assertEqual(chan["posting_cadence"]["posts_today"], 1)
+        self.assertTrue(chan["posting_cadence"]["last_post_date"])
+        self.assertEqual(len(chan["post_log"]), 1)
+        log_item = chan["post_log"][0]
+        self.assertEqual(log_item["clip_id"], "clip-logged-01")
+        self.assertEqual(log_item["video_id"], "yt_success_789")
+        self.assertEqual(log_item["post_url"], "https://youtube.com/shorts/yt_success_789")
+        self.assertEqual(log_item["status"], "published")
+
+    def test_youtube_fallback_logs_to_channels_json(self):
+        """Verifies BrowserOS Neo fallback logs studio URL and increments posts_today in channels.json."""
+        import clipping_publisher
+        from unittest.mock import patch
+
+        with patch("clipping_publisher.resolve_youtube_token", return_value=None):
+            res = clipping_publisher.publish_clip(
+                channels_path=self.channels_path,
+                video_path=self.video_path,
+                brand_cluster="Fallback Brand",
+                clip_id="clip-fallback-01",
+                dry_run=False,
+            )
+
+        self.assertEqual(res["status"], "staged_browseros_neo")
+        self.assertEqual(len(res["publication_manifest"]), 1)
+        entry = res["publication_manifest"][0]
+        self.assertEqual(entry["status"], "fallback_browseros_neo")
+        self.assertEqual(entry["post_url"], "https://studio.youtube.com")
+
+        # Verify channels.json updated on disk
+        updated_data = json.loads(self.channels_path.read_text(encoding="utf-8"))
+        chan = next(c for c in updated_data["channels"] if c["id"] == "chan-yt-cli-fallback")
+        self.assertEqual(chan["posting_cadence"]["posts_today"], 1)
+        self.assertEqual(len(chan["post_log"]), 1)
+        log_item = chan["post_log"][0]
+        self.assertEqual(log_item["clip_id"], "clip-fallback-01")
+        self.assertEqual(log_item["post_url"], "https://studio.youtube.com")
+        self.assertEqual(log_item["status"], "staged_browseros_neo")
+
+    def test_cli_publish_with_privacy_status(self):
+        """Verifies CLI publish accepts --privacy-status unlisted and passes it through."""
+        res = self.run_cli([
+            "publish",
+            "--brand-cluster", "Cli Brand",
+            "--channels", str(self.channels_path),
+            "--video", str(self.video_path),
+            "--privacy-status", "unlisted",
+            "--dry-run",
+            "--json",
+        ])
+        self.assertEqual(res.returncode, 0, f"CLI publish failed: {res.stderr}")
+        data = json.loads(res.stdout)
+        self.assertEqual(data.get("status"), "allocated")
+        yt_entry = data["publication_manifest"][0]
+        self.assertEqual(yt_entry.get("privacy_status"), "unlisted")
+
+
 if __name__ == "__main__":
     unittest.main()
