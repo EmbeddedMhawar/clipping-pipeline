@@ -36,3 +36,42 @@ _Avoid_: Fallback setting, system preset
 The process of extracting campaign rules and payout tables from authenticated creator dashboards (e.g. Whop, Notion) using the dedicated agent browser (`BrowserOS Neo`) and saving them to `raw_guidelines.md`.
 _Avoid_: Web scraping, headless scraping, URL pulling
 
+**Channel Portfolio**:
+The collection of social accounts across platforms operated by a creator, tracked persistently across multiple video projects.
+_Avoid_: Account fleet, channel list, profile set
+
+**Channel Warmup Lifecycle**:
+The deterministic 4-stage progression (`Cold Lurker` → `Seeding` → `Ramp-Up` → `Mature`) governing account activity to prevent platform shadowbans.
+_Avoid_: Account journey, warmup phase, seasoning process
+
+**Warmup Protocol**:
+The specific behavioral constraints (e.g. browsing niche content, 0 posts, engagement intervals) assigned to a channel based on its warmup stage.
+_Avoid_: Warming routine, warmup guide, daily checklist
+
+**Portfolio Registry**:
+The workspace-level JSON database (`channels.json`) storing persistent channel identities, creation dates, active stages, and daily post counters.
+_Avoid_: Channel database, account store, user profile config
+
+**Posting Cadence**:
+The daily post ceiling and time spacing enforced on a channel according to its current warmup stage and campaign limits.
+_Avoid_: Post frequency, posting schedule, daily rate
+
+**Health Gate**:
+The empirical view-count threshold (clearing 200–500 views without suppression) required before advancing a channel from Seeding to Ramp-Up.
+_Avoid_: View checkpoint, algorithm check, traffic test
+
+**Account Cooldown**:
+A mandatory 72-hour zero-posting resting state triggered when a channel experiences view suppression or a 0-view shadowban.
+_Avoid_: Shadowban pause, account timeout, penalty box
+
+**Posting Allocation**:
+The assignment of an approved video clip package to specific eligible channels that possess remaining daily post quota.
+_Avoid_: Channel dispatch, post routing, distribution target
+
+**Daily Task Protocol**:
+The generated set of platform-specific browsing, engagement, or posting actions assigned to a channel for the current day.
+_Avoid_: Daily checklist, warmup routine, daily agenda
+
+**Device Transfer Protocol**:
+The configured mechanism (such as local QR code server, ADB push, Telegram dispatch, or cloud sync) used to deliver rendered clips directly to the creator's mobile device for manual posting.
+_Avoid_: File send, phone sync, video transfer
