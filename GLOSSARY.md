@@ -96,4 +96,33 @@ _Avoid_: Channel family, account group, profile bundle
 Publishing a single approved video clip across different social platforms within the same brand cluster, while strictly prohibiting posting the identical clip to multiple channels on the same platform.
 _Avoid_: Multi-posting, duplicate broadcasting, spray-and-pray
 
+**Topic Segment**:
+A bounded segment of raw interview or podcast footage containing a coherent subject, story, or argument from which multiple distinct clip variations can be extracted.
+_Avoid_: Raw clip, video chunk, footage cut
+
+**Variation Profile**:
+A declarative style specification governing pacing, 0–3s hook formulation, framing logic, caption typography, and audio-visual treatment to transform a topic segment into a unique video edit.
+_Avoid_: Edit style, video preset, custom variation
+
+**Drama Cut**:
+A variation profile focused on emotional extremity, starting with the most vulnerable or shocking statement, aggressive reaction punch-ins, bold kinetic highlights, and subtle riser sound effects.
+_Avoid_: Shock cut, emotional edit, fast cut
+
+**Debate Bait Cut**:
+A variation profile engineered for high comment engagement (≥ 1%), opening with a provocative on-screen question card and rapid back-and-forth reaction cuts between speakers.
+_Avoid_: Argument cut, question video, debate clip
+
+**Narrative Cut**:
+A variation profile optimized for high completion rate and watch time, opening with an unresolved curiosity loop, conversational pacing, and contextual B-roll or screenshot overlays.
+_Avoid_: Story cut, documentary edit, long cut
+
+**Speaker Framing Anchor**:
+Smart-center vertical framing lock ensuring the active speaking subject is continuously centered in the 9:16 canvas unless deliberately replaced by contextual visual cutaways.
+_Avoid_: Face tracking crop, center crop, auto-reframe
+
+**Channel Profile Mapping**:
+The deterministic pairing between a Variation Profile and a specific channel in the Portfolio Registry based on channel niche and editorial persona.
+_Avoid_: Channel assignment, post binding, account targeting
+
+
 
