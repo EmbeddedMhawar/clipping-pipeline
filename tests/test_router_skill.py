@@ -74,12 +74,12 @@ class TestRouterSkillFrontmatter(unittest.TestCase):
         parts = content.split("---", 2)
         frontmatter = parts[1]
 
-        # Trigger phrases required by Ticket #4:
-        # 'clipping pipeline', 'clip short-form', 'run clipping workflow'
+        # Trigger phrases required per review findings:
         required_triggers = [
             "clipping pipeline",
-            "clip short-form",
-            "run clipping workflow",
+            "execution workflow",
+            "7 gated stages",
+            "pre-flight transition checks",
         ]
         for trigger in required_triggers:
             self.assertIn(

@@ -273,7 +273,20 @@ class TestClippingStateCLI(unittest.TestCase):
             ["validate", "--step", "clipping-transcription", "--dir", str(self.project_dir)]
         )
         self.assertEqual(res_step2.returncode, 2)
-        self.assertIn("Pre-flight Gate Blocked", res_step2.stderr)
+        self.assertIn(
+            "Pre-flight Gate Blocked: Campaign guidelines must be approved before running 'clipping-transcription'.",
+            res_step2.stderr,
+        )
+
+        # clipping-hook-hunter -> blocked with dynamic message including step name
+        res_step3_pre = self.run_cli(
+            ["validate", "--step", "clipping-hook-hunter", "--dir", str(self.project_dir)]
+        )
+        self.assertEqual(res_step3_pre.returncode, 2)
+        self.assertIn(
+            "Pre-flight Gate Blocked: Campaign guidelines must be approved before running 'clipping-hook-hunter'.",
+            res_step3_pre.stderr,
+        )
 
         # clipping-transcription with --force -> passes (code 0)
         res_step2_force = self.run_cli(
@@ -431,6 +444,47 @@ class TestClippingStateCLI(unittest.TestCase):
         status_obj = json.loads(res_json.stdout)
         self.assertIn("steps", status_obj)
         self.assertIn("guidelines_approved", status_obj)
+
+    def test_ingest_sparse_brief_decoupled_defaults(self):
+        self.run_cli(["init", "--dir", str(self.project_dir)], check=True)
+
+        sparse_brief = {
+            "campaign": {"title": "Generic Campaign", "project": "generic-p"},
+            "global_rules": {},
+        }
+        brief_path = self.project_dir / "sparse_brief.json"
+        brief_path.write_text(json.dumps(sparse_brief), encoding="utf-8")
+
+        self.run_cli(
+            ["ingest-brief", "--brief", str(brief_path), "--dir", str(self.project_dir)],
+            check=True,
+        )
+
+        with open(self.state_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+
+        steps = state["steps"]
+
+        # 1. Phonetic dictionary should be empty dict, not contain ADIN/MPJ
+        trans_params = steps["clipping-transcription"]["params"]
+        self.assertEqual(trans_params.get("phonetic_dictionary"), {})
+        self.assertEqual(trans_params.get("diarization_speakers"), [])
+
+        # 2. Priority hook topics should be empty list, not faked death/dubai jail
+        hook_params = steps["clipping-hook-hunter"]["params"]
+        self.assertEqual(hook_params.get("priority_hook_topics"), [])
+
+        # 3. Speaker x anchors should be empty dict, not N3on/MPJ
+        assembly_params = steps["clipping-assembly"]["params"]
+        self.assertEqual(assembly_params.get("speaker_x_anchors"), {})
+
+        # 4. Trigger keywords should be empty list, not N3ON/MPJ
+        caption_params = steps["clipping-captions"]["params"]
+        self.assertEqual(caption_params.get("trigger_keywords"), [])
+
+        # 5. Watermark asset should be empty string when not specified
+        vfx_params = steps["clipping-vfx-sfx"]["params"]
+        self.assertEqual(vfx_params.get("watermark_asset"), "")
 
 
 if __name__ == "__main__":

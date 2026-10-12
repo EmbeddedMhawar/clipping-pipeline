@@ -33,6 +33,7 @@ class TestPluginManifest(unittest.TestCase):
             "author",
             "repository",
             "suggestedPrompts",
+            "keywords",
         ]
         for key in required_keys:
             self.assertIn(key, data, f"Missing required key '{key}' in plugin.json")
@@ -63,6 +64,17 @@ class TestPluginManifest(unittest.TestCase):
         for prompt in data["suggestedPrompts"]:
             self.assertIsInstance(prompt, str)
             self.assertTrue(len(prompt.strip()) > 0, "Prompt must not be empty")
+
+        self.assertIsInstance(data["keywords"], list)
+        expected_keywords = [
+            "clipping",
+            "video-editing",
+            "shorts",
+            "tiktok",
+            "reels",
+            "creator-rewards",
+        ]
+        self.assertEqual(data["keywords"], expected_keywords)
 
     def test_directory_structure(self):
         required_dirs = ["scripts", "references", "skills", "tests"]

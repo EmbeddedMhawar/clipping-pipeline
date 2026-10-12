@@ -16,6 +16,8 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -31,7 +33,7 @@ COLE_CORCORAN_DEFAULTS = {
     "engagement_min_pct": 1.0,
     "watermark": {
         "required": True,
-        "asset_path": "assets/watermark_yt_mpj.png",
+        "asset_path": "",
         "persistent_entire_clip": True,
         "banned_corners": True,
     },
@@ -49,20 +51,7 @@ COLE_CORCORAN_DEFAULTS = {
         "opus_clips",
     ],
     "single_post_per_edit": True,
-    "caption_closers": [
-        "watch the full episode @mpj on youtube",
-        "full episode is on @mpj on youtube",
-        "the whole thing is up on @mpj on youtube",
-        "go watch the full one @mpj on youtube",
-        "full ep is on @mpj on youtube",
-        "this is from the full episode @mpj on youtube",
-        "catch the rest @mpj on youtube",
-        "the full sit down is on @mpj on youtube",
-        "watch it all @mpj on youtube",
-        "full interview is on @mpj on youtube",
-        "rest of it is on @mpj on youtube",
-        "whole episode @mpj on youtube",
-    ],
+    "caption_closers": [],
     "platform_overrides": {
         "youtube_shorts": {
             "api_upload_allowed": True,
@@ -72,12 +61,12 @@ COLE_CORCORAN_DEFAULTS = {
         "tiktok": {
             "api_upload_allowed": False,
             "handle_format": "plain_text",
-            "bio_affiliate_disclaimer": "fan page of @curiousmike\nnot affiliated",
+            "bio_affiliate_disclaimer": "",
         },
         "instagram_reels": {
             "api_upload_allowed": False,
             "handle_format": "plain_text",
-            "bio_affiliate_disclaimer": "fan page of @curiousmike\nnot affiliated",
+            "bio_affiliate_disclaimer": "",
         },
     },
 }
@@ -127,15 +116,13 @@ def parse_raw_guidelines_text(text: str) -> Tuple[Dict[str, Any], List[str]]:
             client = f"@{handle.strip()}"
     elif "curious mike" in text.lower():
         client = "Curious Mike"
-    elif "mpj" in text.lower():
-        client = "Curious Mike"
 
     # Source video
     yt_url_match = re.search(r"https?://(?:www\.)?youtube\.com/watch\?v=([a-zA-Z0-9_-]+)", text)
     source_url = yt_url_match.group(0) if yt_url_match else ""
 
     channel_match = re.search(r"(?:\*\*|\b)Channel\**:\s*`?(@[a-zA-Z0-9_.]+)`?", text, re.IGNORECASE)
-    channel = channel_match.group(1) if channel_match else ("@mpj" if "mpj" in text.lower() else "")
+    channel = channel_match.group(1) if channel_match else ""
 
     duration_match = re.search(r"\((\d{1,2}:\d{2}(?::\d{2})?)\)", text)
     source_duration = duration_match.group(1) if duration_match else ""
@@ -205,13 +192,13 @@ def parse_raw_guidelines_text(text: str) -> Tuple[Dict[str, Any], List[str]]:
         defaults_applied.append(f"engagement_min_pct: {engagement_min}% (likes+comments/views) [Default Applied]")
 
     # Watermark
-    watermark_asset_match = re.search(r"assets/[a-zA-Z0-9_.-]+(?:png|webp)", text)
+    watermark_asset_match = re.search(r"assets/[a-zA-Z0-9_.-]+(?:\.png|\.webp|png|webp)", text)
     if watermark_asset_match:
         watermark_asset = watermark_asset_match.group(0)
     else:
         watermark_asset = COLE_CORCORAN_DEFAULTS["watermark"]["asset_path"]
         if "watermark" not in text.lower():
-            defaults_applied.append(f"watermark: {watermark_asset} persistent, banned in 4 corners [Default Applied]")
+            defaults_applied.append("watermark: persistent, banned in 4 corners [Default Applied]")
 
     watermark_req = True
     watermark_rule = {
@@ -229,7 +216,8 @@ def parse_raw_guidelines_text(text: str) -> Tuple[Dict[str, Any], List[str]]:
         closers = [c.strip() for c in closer_matches]
     else:
         closers = list(COLE_CORCORAN_DEFAULTS["caption_closers"])
-        defaults_applied.append("caption_closers: 12 approved rotated closers [Default Applied]")
+        if not closers and "closer" not in text.lower():
+            defaults_applied.append("caption_closers: rotated approved closers required [Default Applied]")
 
     # Audio
     audio_rule = dict(COLE_CORCORAN_DEFAULTS["audio"])
@@ -251,15 +239,17 @@ def parse_raw_guidelines_text(text: str) -> Tuple[Dict[str, Any], List[str]]:
     # Platform overrides
     platform_overrides = json.loads(json.dumps(COLE_CORCORAN_DEFAULTS["platform_overrides"]))
     # Extract bio templates if present
-    ig_bio_match = re.search(r"Instagram Bio:?\s*```(?:text)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+    ig_bio_match = re.search(r"Instagram\s+Bio:?\s*(?:```(?:text)?\s*)?(.*?)(?:```|\n\s*-\s*\*\*|\n##|\Z)", text, re.DOTALL | re.IGNORECASE)
     if ig_bio_match:
-        platform_overrides["instagram_reels"]["bio_affiliate_disclaimer"] = ig_bio_match.group(1).strip()
-    elif "fan page of" in text:
-        platform_overrides["instagram_reels"]["bio_affiliate_disclaimer"] = "fan page of @curiousmike\nnot affiliated"
+        bio_text = ig_bio_match.group(1).strip().strip("`").strip()
+        if bio_text:
+            platform_overrides["instagram_reels"]["bio_affiliate_disclaimer"] = bio_text
 
-    tiktok_bio_match = re.search(r"TikTok Bio:?\s*```(?:text)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+    tiktok_bio_match = re.search(r"TikTok\s+Bio:?\s*(?:```(?:text)?\s*)?(.*?)(?:```|\n\s*-\s*\*\*|\n##|\Z)", text, re.DOTALL | re.IGNORECASE)
     if tiktok_bio_match:
-        platform_overrides["tiktok"]["bio_affiliate_disclaimer"] = tiktok_bio_match.group(1).strip()
+        bio_text = tiktok_bio_match.group(1).strip().strip("`").strip()
+        if bio_text:
+            platform_overrides["tiktok"]["bio_affiliate_disclaimer"] = bio_text
 
     normalized_brief: Dict[str, Any] = {
         "version": "1.0.0",
@@ -349,12 +339,16 @@ def format_review_artifact(brief: Dict[str, Any]) -> str:
         "",
         f"1. **Audience Geography**: Minimum **{tier1}% Tier-1 Viewers** (US, Canada, UK combined).",
         f"2. **Engagement Rate**: Minimum **{engagement}%** `(Likes + Comments) / Views >= {engagement / 100:.2f}`.",
-        f"3. **Persistent Watermark**: Mandatory official watermark (`{watermark.get('asset_path', 'assets/watermark_yt_mpj.png')}`) visible entire clip, banned in all 4 corners.",
+        f"3. **Persistent Watermark**: Mandatory official watermark (`{watermark.get('asset_path') or 'Official Campaign Watermark Asset'}`) visible entire clip, banned in all 4 corners.",
         f"4. **Audio & Loudness**: Original dialogue normalized to **{audio.get('loudness_target_lufs', -14.0)} LUFS**; zero phonk music, zero loud background music beds.",
         f"5. **Duration Bounds**: Ideal target **{duration.get('ideal_min', 25.0)}s–{duration.get('ideal_max', 45.0)}s** (hard bounds {duration.get('min_seconds', 20.0)}s–{duration.get('max_seconds', 60.0)}s).",
         f"6. **Prohibited Edits**: {', '.join(prohibited)} (instant rejection).",
         "7. **Anti-Duplication**: One Clip, One Post (each unique edit posted only once across accounts).",
-        f"8. **Mandatory Rotated Closers**: Every post caption must conclude with one of the **{len(closers)} approved closers**.",
+        (
+            f"8. **Mandatory Rotated Closers**: Every post caption must conclude with one of the **{len(closers)} approved closers**."
+            if closers
+            else "8. **Mandatory Rotated Closers**: Every post caption must conclude with an approved campaign closer."
+        ),
         "",
         "## 3. Platform Specific Overrides",
         "",
@@ -422,6 +416,11 @@ def main() -> None:
     )
     group.add_argument("--text", "-t", help="Raw guidelines text string")
     group.add_argument("--brief", "-b", help="Existing campaign_brief.json to review/update")
+    group.add_argument(
+        "--url",
+        "-u",
+        help="HTTP/HTTPS URL to fetch and ingest guidelines directly",
+    )
 
     parser.add_argument("--dir", "-d", default=None, help="Target project directory")
     parser.add_argument(
@@ -469,6 +468,29 @@ def main() -> None:
             sys.exit(1)
         raw_text = raw_file.read_text(encoding="utf-8")
         brief, _ = parse_raw_guidelines_text(raw_text)
+    elif args.url:
+        if not (args.url.startswith("http://") or args.url.startswith("https://")):
+            sys.stderr.write(f"Error: URL must begin with http:// or https://: {args.url}\n")
+            sys.exit(1)
+        try:
+            req = urllib.request.Request(
+                args.url,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; ClippingPipeline/1.0)"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                charset = resp.headers.get_content_charset() or "utf-8"
+                raw_text = resp.read().decode(charset, errors="replace")
+        except Exception as e:
+            sys.stderr.write(f"Error fetching guidelines from URL {args.url}: {e}\n")
+            sys.exit(1)
+
+        if raw_text.strip().startswith("{"):
+            try:
+                brief = json.loads(raw_text)
+            except Exception:
+                brief, _ = parse_raw_guidelines_text(raw_text)
+        else:
+            brief, _ = parse_raw_guidelines_text(raw_text)
     else:
         brief, _ = parse_raw_guidelines_text(args.text)
 

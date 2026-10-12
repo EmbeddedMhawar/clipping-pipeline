@@ -95,7 +95,6 @@ class TestGuidelinesSkillFrontmatter(unittest.TestCase):
         required_triggers = [
             "clipping guidelines",
             "campaign brief",
-            "ingest guidelines",
             "whop rules",
             "payout rules",
         ]
@@ -406,7 +405,77 @@ Every edit gets posted once.
         res_val_pass = subprocess.run(cmd_val_pass, capture_output=True, text=True)
         self.assertEqual(res_val_pass.returncode, 0, "Expected exit code 0 when guidelines approved")
 
+    def test_url_ingestion_http(self):
+        import http.server
+        import threading
+
+        sample_text = (
+            "# Remote Stream Clipping Campaign Guidelines\n\n"
+            "Earn $1.50 per 1000 views. Minimum payout is $5 (3000 views minimum). "
+            "Capped at $200 per clip. Post on TikTok and YouTube Shorts.\n"
+        )
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/markdown; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(sample_text.encode("utf-8"))
+
+            def log_message(self, format, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        port = server.server_port
+        thread = threading.Thread(target=server.serve_forever)
+        thread.daemon = True
+        thread.start()
+
+        try:
+            url = f"http://127.0.0.1:{port}/guidelines.md"
+            out_brief = self.project_dir / "url_brief.json"
+            out_art = self.project_dir / "url_review.md"
+
+            cmd = [
+                sys.executable,
+                str(self.ingest_script),
+                "--url",
+                url,
+                "--dir",
+                str(self.project_dir),
+                "--output-brief",
+                str(out_brief),
+                "--output-artifact",
+                str(out_art),
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0, f"URL ingestion failed: {res.stderr}")
+            self.assertTrue(out_brief.is_file())
+            self.assertTrue(out_art.is_file())
+
+            with open(out_brief, "r", encoding="utf-8") as f:
+                brief = json.load(f)
+            self.assertEqual(brief["campaign"]["title"], "Remote Stream Clipping Campaign")
+            self.assertEqual(brief["campaign"]["economics"]["rate_per_1k_views"], 1.50)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_url_ingestion_invalid_scheme(self):
+        cmd = [
+            sys.executable,
+            str(self.ingest_script),
+            "--url",
+            "ftp://invalid-url.com/file.md",
+            "--dir",
+            str(self.project_dir),
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("must begin with http:// or https://", res.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

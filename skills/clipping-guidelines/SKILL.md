@@ -1,13 +1,13 @@
 ---
 name: clipping-guidelines
-description: Ingest campaign guidelines, Whop rules, payout terms, and brand constraints from markdown, prompt text, or URLs. Normalizes into campaign_brief.json, injects Tier-1 viral defaults [Default Applied], and gates pipeline progress via interactive review artifact. Trigger on: clipping guidelines, campaign brief, ingest guidelines, whop rules, payout rules.
+description: Ingest and normalize clipping guidelines and campaign briefs (Whop rules, payout rules) into structured schema with Tier-1 defaults and approval gate.
 ---
 
 # Clipping Guidelines Ingestion & Approval Gate
 
 Step 1 of the Short-Form Clipping Pipeline. Ingests raw campaign briefs across diverse sources, normalizes them against the schema, injects Cole Corcoran Tier-1 viral defaults for omitted rules, pre-digests parameter slices into pipeline state, and gates progress behind human approval.
 
-See [`references/CAMPAIGN_BRIEF_SCHEMA.md`](../../references/CAMPAIGN_BRIEF_SCHEMA.md) for the authoritative schema specification.
+See [`references/CAMPAIGN_BRIEF_SCHEMA.md`](../../references/CAMPAIGN_BRIEF_SCHEMA.md) for the authoritative schema specification and default values. Step-specific parameters are extracted dynamically via `scripts/clipping_state.py get-step-config`.
 
 ---
 
@@ -19,7 +19,7 @@ Follow these sequential steps on every invocation:
 Identify the source format provided by the user:
 - **Local Workspace File**: If the user points to a markdown file (e.g. `CAMPAIGN_GUIDELINES.md`), read it via `view_file`.
 - **Pasted Text**: If guidelines or campaign requirements are provided directly in the prompt, pass the text string.
-- **Remote Web Page**: If a URL is provided (e.g. Notion doc, Google Doc, Whop link), fetch contents using `read_url_content`.
+- **Remote Web Page or API**: If a URL is provided (e.g. Notion doc, Google Doc, Whop link), pass `--url` to `scripts/ingest_guidelines.py` or fetch contents using `read_url_content`.
 
 ### 2. Normalize and Inject Tier-1 Defaults
 Execute the ingestion normalizer:
@@ -38,29 +38,31 @@ python3 scripts/ingest_guidelines.py \
   --output-brief <project-dir>/campaign_brief.json \
   --output-artifact <project-dir>/campaign_brief_review.md
 ```
+Or for remote URLs:
+```bash
+python3 scripts/ingest_guidelines.py \
+  --url "<url>" \
+  --dir <project-dir> \
+  --output-brief <project-dir>/campaign_brief.json \
+  --output-artifact <project-dir>/campaign_brief_review.md
+```
 
-The script extracts all explicit rules and injects Cole Corcoran Tier-1 defaults marked with `[Default Applied]` for any unmentioned criteria:
-- **Target Duration**: 25s–45s ideal (hard bounds 20s–60s) `[Default Applied]`
-- **Hook Timing**: 0–3s high-curiosity hook window `[Default Applied]`
-- **Dead-Air Prune**: Cuts dead air $>0.4$s with 80ms consonant buffer `[Default Applied]`
-- **Captions**: Kinetic word-by-word captions in mic/chest safe zone (`margin_v: 420`) `[Default Applied]`
-- **Audio Normalization**: Dialogue normalized to `-14.0 LUFS`, zero loud music beds `[Default Applied]`
-- **Target Audience**: $\ge 40\%$ Tier-1 viewers (US, CA, UK combined) `[Default Applied]`
-- **Engagement Floor**: $\ge 1.0\%$ `(likes + comments) / views` `[Default Applied]`
-- **Persistent Watermark**: Mandatory official asset, visible entire clip, banned in 4 corners `[Default Applied]`
-- **Rotated Closers**: 12 approved YouTube closers rotated across posts `[Default Applied]`
-- **Anti-Duplication**: Single post per edit across channels `[Default Applied]`
+The script extracts explicit rules and injects Cole Corcoran Tier-1 defaults tagged `[Default Applied]` when criteria are omitted. For full schema definitions, consult [`references/CAMPAIGN_BRIEF_SCHEMA.md`](../../references/CAMPAIGN_BRIEF_SCHEMA.md). Pre-digested parameter slices for downstream steps are queried via `scripts/clipping_state.py get-step-config`.
 
 ### 3. Verify Pre-Digested State Slices
 Ensure `.clipping_state.json` contains sliced configurations for downstream steps:
 ```bash
 python3 scripts/clipping_state.py status --dir <project-dir>
 ```
+Inspect step-specific parameter slices as needed:
+```bash
+python3 scripts/clipping_state.py get-step-config --step clipping-transcription --dir <project-dir>
+```
 Confirm that:
 - `current_step` is `clipping-guidelines`
 - `guidelines_approved` is `false`
 - `steps["clipping-guidelines"].status` is `awaiting_approval`
-- `steps["clipping-transcription"].params` and other step slices are populated.
+- Downstream step parameter slices (`clipping-transcription` through `clipping-qc-packager`) are populated.
 
 ### 4. Present Interactive Review Artifact
 Present the generated `campaign_brief_review.md` to the user as an artifact with `RequestFeedback: true`. The artifact must clearly exhibit:

@@ -1,11 +1,13 @@
 ---
 name: clipping-pipeline
-description: Master orchestrator router for the 7-step short-form video clipping pipeline. Inspects pipeline state, enforces pre-flight transition gates, isolates step configuration slices, and dispatches execution across the clipping lifecycle. Trigger on: clipping pipeline, clip short-form, run clipping workflow.
+description: Orchestrate short-form clipping pipeline and execution workflow across 7 gated stages with pre-flight transition checks.
 ---
 
 # Master Pipeline Router (clipping-pipeline)
 
 Master router and orchestrator for the 7-step short-form video clipping pipeline. Inspects campaign state, validates pre-flight transition gates, prevents premature execution across unapproved stages, isolates configuration load, and manages dispatch across all editing phases.
+
+For campaign rules and data contracts, see [`references/CAMPAIGN_BRIEF_SCHEMA.md`](../../references/CAMPAIGN_BRIEF_SCHEMA.md). For step-isolated execution parameters, query `scripts/clipping_state.py get-step-config`.
 
 ---
 
@@ -14,12 +16,12 @@ Master router and orchestrator for the 7-step short-form video clipping pipeline
 The clipping pipeline executes strictly in this sequential order:
 
 1. `clipping-guidelines`: Ingest campaign brief, normalize rules, inject Cole Corcoran Tier-1 viral defaults (`[Default Applied]`), render review artifact, and secure human approval gate.
-2. `clipping-transcription`: Extract high-fidelity audio, generate word-level timestamped transcripts, diarize speakers, and apply phonetic correction.
-3. `clipping-hook-hunter`: Locate viral curiosity gaps and high-stakes statements, map 0–3s hook windows, score candidate moments, and enforce 20s–60s bounds.
-4. `clipping-assembly`: Build 9:16 vertical canvas (1080×1920), anchor speaker x-coordinates, and prune dead air $>0.4$s with 80ms consonant buffer.
-5. `clipping-captions`: Generate kinetic word-by-word captions in mic/chest safe zone (`margin_v: 420`), applying keyword emphasis and highlight colors.
-6. `clipping-vfx-sfx`: Composite mandatory persistent watermark (disallowed in 4 corners), add title hook graphic, and inject subtle audio transient accents without loud background music beds.
-7. `clipping-qc-packager`: Audit loudness against EBU R128 (-14 LUFS), verify rotated approved caption closers, validate platform compliance, and format for 30-minute Whop submission window.
+2. `clipping-transcription`: Extract audio, generate word-level timestamped transcripts, diarize speakers, and apply phonetic correction.
+3. `clipping-hook-hunter`: Locate viral curiosity gaps and 0–3s hook windows, scoring candidate moments within duration bounds.
+4. `clipping-assembly`: Build 9:16 vertical canvas (1080×1920), anchor speaker positions, and prune dead air $>0.4$s with consonant buffer.
+5. `clipping-captions`: Generate kinetic captions in mic/chest safe zone, applying keyword emphasis.
+6. `clipping-vfx-sfx`: Composite mandatory persistent watermark, title hook graphic, and subtle audio transient accents.
+7. `clipping-qc-packager`: Audit loudness against -14 LUFS, verify rotated approved caption closers, and format for 30-minute Whop submission window.
 
 ---
 
@@ -65,13 +67,7 @@ python3 scripts/clipping_state.py validate --step <target-step> --dir <project-d
 ```
 
 #### Transition Gate Rules
-- `clipping-guidelines`: Requires initialized state file.
-- `clipping-transcription`: Blocked if `guidelines_approved == false`.
-- `clipping-hook-hunter`: Blocked if `clipping-transcription` is not completed.
-- `clipping-assembly`: Blocked if `clipping-hook-hunter` is not completed.
-- `clipping-captions`: Blocked if `clipping-assembly` is not completed.
-- `clipping-vfx-sfx`: Blocked if `clipping-captions` is not completed.
-- `clipping-qc-packager`: Blocked if `clipping-vfx-sfx` is not completed.
+Each stage requires its immediate predecessor to be completed and approved in `.clipping_state.json`. `clipping-guidelines` must be approved (`guidelines_approved: true`) before any downstream editing commences. Verify gate clearance dynamically via `python3 scripts/clipping_state.py validate --step <target-step> --dir <project-dir>`.
 
 #### Gate Exit Codes
 - **Exit Code `0`**: Gate cleared. Proceed with execution.
@@ -87,7 +83,7 @@ Extract only the pre-digested configuration slice for the active step:
 python3 scripts/clipping_state.py get-step-config --step <target-step> --dir <project-dir>
 ```
 
-Provide the resulting JSON payload directly to the executing step subagent.
+Consult [`references/CAMPAIGN_BRIEF_SCHEMA.md`](../../references/CAMPAIGN_BRIEF_SCHEMA.md) for full schema definitions and allowable parameters. Provide the resulting JSON payload directly to the executing step subagent.
 
 ### 5. Step Dispatch & Advance
 

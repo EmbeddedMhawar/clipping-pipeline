@@ -212,7 +212,7 @@ def cmd_ingest_brief(args: argparse.Namespace) -> int:
     watermark_asset = (
         watermark_rule.get("asset_path")
         or watermark_rule.get("asset")
-        or "assets/watermark_yt_mpj.png"
+        or ""
     )
 
     caption_closers = (
@@ -244,17 +244,10 @@ def cmd_ingest_brief(args: argparse.Namespace) -> int:
         ),
         "sample_rate": brief.get("transcription", {}).get("sample_rate", 48000),
         "phonetic_dictionary": brief.get("transcription", {}).get(
-            "phonetic_dictionary",
-            {
-                "ADIN": "Adin",
-                "KICK": "Kick",
-                "DUBAI": "Dubai",
-                "MPJ": "MPJ",
-                "STREAMERS": "streamers",
-            },
+            "phonetic_dictionary", {}
         ),
         "diarization_speakers": brief.get("transcription", {}).get(
-            "diarization_speakers", ["Speaker 1", "Speaker 2"]
+            "diarization_speakers", []
         ),
     }
 
@@ -265,8 +258,7 @@ def cmd_ingest_brief(args: argparse.Namespace) -> int:
             brief.get("hook_hunter", {}).get("hook_window_seconds", 3.0)
         ),
         "priority_hook_topics": brief.get("hook_hunter", {}).get(
-            "priority_hook_topics",
-            ["faked death", "dubai jail", "bank balance", "falling off fear"],
+            "priority_hook_topics", []
         ),
         "manifest_path": brief.get("hook_hunter", {}).get(
             "manifest_path", "references/campaign_manifest.json"
@@ -277,7 +269,7 @@ def cmd_ingest_brief(args: argparse.Namespace) -> int:
         "canvas": {"width": 1080, "height": 1920, "aspect": "9:16"},
         "layout": brief.get("assembly", {}).get("layout", "smart-center"),
         "speaker_x_anchors": brief.get("assembly", {}).get(
-            "speaker_x_anchors", {"N3on": 0.49, "MPJ": 0.53}
+            "speaker_x_anchors", {}
         ),
         "dead_air_threshold_seconds": float(
             brief.get("assembly", {}).get("dead_air_threshold_seconds", 0.4)
@@ -305,19 +297,7 @@ def cmd_ingest_brief(args: argparse.Namespace) -> int:
             },
         ),
         "trigger_keywords": brief.get("captions", {}).get(
-            "trigger_keywords",
-            [
-                "N3ON",
-                "MPJ",
-                "DUBAI",
-                "JAIL",
-                "DEATH",
-                "MONEY",
-                "MILLION",
-                "BANK",
-                "STREAMER",
-                "NBA",
-            ],
+            "trigger_keywords", []
         ),
     }
 
@@ -486,7 +466,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     # Check 1: Any step after clipping-guidelines requires guidelines_approved == True
     if step_name != "clipping-guidelines":
         if not state.get("guidelines_approved", False):
-            msg = "Pre-flight Gate Blocked: Campaign guidelines must be approved before running transcription."
+            msg = f"Pre-flight Gate Blocked: Campaign guidelines must be approved before running '{step_name}'."
             if args.force:
                 sys.stdout.write(f"[WARNING] Pre-flight gate bypassed with --force: {msg}\n")
                 return 0
