@@ -31,15 +31,7 @@ Identify the source format provided by the user:
 Execute the ingestion normalizer:
 ```bash
 python3 scripts/ingest_guidelines.py \
-  --file <path-to-guidelines.md> \
-  --dir <project-dir> \
-  --output-brief <project-dir>/campaign_brief.json \
-  --output-artifact <project-dir>/campaign_brief_review.md
-```
-Or for web briefs extracted via BrowserOS Neo:
-```bash
-python3 scripts/ingest_guidelines.py \
-  --file <project-dir>/raw_guidelines.md \
+  --file <path-to-guidelines.md-or-raw_guidelines.md> \
   --dir <project-dir> \
   --output-brief <project-dir>/campaign_brief.json \
   --output-artifact <project-dir>/campaign_brief_review.md

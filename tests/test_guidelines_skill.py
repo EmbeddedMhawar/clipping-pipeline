@@ -22,6 +22,11 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 REFERENCES_DIR = REPO_ROOT / "references"
 SKILLS_DIR = REPO_ROOT / "skills" / "clipping-guidelines"
 
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.ingest_guidelines import URL_DEPRECATION_ADVISORY
+
 
 class TestCampaignBriefSchema(unittest.TestCase):
     """Verifies references/CAMPAIGN_BRIEF_SCHEMA.md exists and defines valid schema."""
@@ -454,7 +459,7 @@ Every edit gets posted once.
             self.assertTrue(out_art.is_file())
 
             self.assertIn(
-                "[Notice] --url uses unauthenticated HTTP fetching. For authenticated creator dashboards (Whop, Notion, Google Docs), use BrowserOS Neo to save raw_guidelines.md first.",
+                URL_DEPRECATION_ADVISORY,
                 res.stderr,
             )
             with open(out_brief, "r", encoding="utf-8") as f:
@@ -477,7 +482,7 @@ Every edit gets posted once.
         res = subprocess.run(cmd, capture_output=True, text=True)
         self.assertNotEqual(res.returncode, 0)
         self.assertIn(
-            "[Notice] --url uses unauthenticated HTTP fetching. For authenticated creator dashboards (Whop, Notion, Google Docs), use BrowserOS Neo to save raw_guidelines.md first.",
+            URL_DEPRECATION_ADVISORY,
             res.stderr,
         )
         self.assertIn("must begin with http:// or https://", res.stderr)
@@ -510,8 +515,8 @@ Every edit gets posted once.
             brief = json.load(f)
 
         self.assertEqual(brief.get("campaign", {}).get("title"), "N3on x MPJ Clipping Campaign")
-        # Notice stderr should NOT contain advisory notice when --file is used
-        self.assertNotIn("[Notice] --url uses unauthenticated HTTP fetching", res.stderr)
+        # Stderr should NOT contain advisory notice when --file is used
+        self.assertNotIn(URL_DEPRECATION_ADVISORY, res.stderr)
 
 
 if __name__ == "__main__":

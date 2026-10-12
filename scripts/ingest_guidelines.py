@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+URL_DEPRECATION_ADVISORY = "[Warning] --url uses unauthenticated HTTP fetching. For authenticated creator dashboards (Whop, Notion, Google Docs), use BrowserOS Neo to save raw_guidelines.md first.\n"
+
 COLE_CORCORAN_DEFAULTS = {
     "duration": {
         "min_seconds": 20.0,
@@ -469,9 +471,7 @@ def main() -> None:
         raw_text = raw_file.read_text(encoding="utf-8")
         brief, _ = parse_raw_guidelines_text(raw_text)
     elif args.url:
-        sys.stderr.write(
-            "[Notice] --url uses unauthenticated HTTP fetching. For authenticated creator dashboards (Whop, Notion, Google Docs), use BrowserOS Neo to save raw_guidelines.md first.\n"
-        )
+        sys.stderr.write(URL_DEPRECATION_ADVISORY)
         if not (args.url.startswith("http://") or args.url.startswith("https://")):
             sys.stderr.write(f"Error: URL must begin with http:// or https://: {args.url}\n")
             sys.exit(1)
