@@ -1,6 +1,6 @@
 # Packaging as a Standalone Plugin with GitHub Publishing
 
-The clipping pipeline needs to operate across multiple video editing workspaces without polluting individual projects or tangling with existing monolithic plugins. We decided to package the suite as an independent Antigravity plugin repository (`clipping-pipeline`) hosted at `https://github.com/EmbeddedMhawar/clipping-pipeline`, locally located at `~/Hobby/clipping-pipeline`, and symlinked into `~/.gemini/config/plugins/clipping-pipeline`.
+The clipping pipeline needs to operate across multiple video editing workspaces without polluting individual projects or tangling with existing monolithic plugins. We decided to package the suite as an independent Antigravity plugin repository (`clipping-pipeline`) hosted at `https://github.com/EmbeddedMhawar/clipping-pipeline`, locally located at `~/Work/clipping-pipeline`, and symlinked into `~/.gemini/config/plugins/clipping-pipeline`.
 
 ## Status
 

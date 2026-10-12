@@ -114,13 +114,13 @@ python3 scripts/clipping_state.py get-step-config --step clipping-captions --dir
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/EmbeddedMhawar/clipping-pipeline.git ~/Hobby/clipping-pipeline
+git clone https://github.com/EmbeddedMhawar/clipping-pipeline.git ~/Work/clipping-pipeline
 ```
 
 ### 2. Symlink into Antigravity Plugins Directory
 ```bash
 mkdir -p ~/.gemini/config/plugins
-ln -s ~/Hobby/clipping-pipeline ~/.gemini/config/plugins/clipping-pipeline
+ln -s ~/Work/clipping-pipeline ~/.gemini/config/plugins/clipping-pipeline
 ```
 
 ### 3. Verify Plugin Discovery
