@@ -1,3 +1,3 @@
-# 0003: Automated Device Delivery for Mobile-Enforced Platforms
+# 0009: Automated Device Delivery for Mobile-Enforced Platforms
 
 Paid clipping reward programs and anti-shadowban policies on TikTok and Instagram Reels explicitly prohibit automated API uploads (`api_upload_allowed: false`), requiring manual posting from mobile devices. To bridge the operational gap between desktop/Linux rendering and mobile execution without manual friction, the system provides automated device transfer protocols (e.g. zero-dependency local QR download server, ADB push, Telegram dispatch, or cloud folder sync) configured during onboarding and triggered automatically during Step 7 packaging.

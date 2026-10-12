@@ -11,9 +11,9 @@ and automated device transfer protocols.
 Zero external runtime dependencies (Python standard library only).
 Conforms to:
 - references/CHANNEL_PORTFOLIO_SCHEMA.md
-- docs/adr/0001-workspace-level-channel-portfolio-registry.md
-- docs/adr/0002-health-gated-warmup-advancement.md
-- docs/adr/0003-automated-device-delivery.md
+- docs/adr/0007-workspace-level-channel-portfolio-registry.md
+- docs/adr/0008-health-gated-warmup-advancement.md
+- docs/adr/0009-automated-device-delivery.md
 """
 
 import argparse
