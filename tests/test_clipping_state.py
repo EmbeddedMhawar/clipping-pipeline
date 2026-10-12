@@ -421,6 +421,15 @@ class TestClippingStateCLI(unittest.TestCase):
             )
             self.assertEqual(chk_ok.returncode, 0, f"Step {step} should be unblocked")
 
+        # Inject publication manifest before approving final step (clipping-publisher)
+        with open(self.state_file, "r", encoding="utf-8") as f:
+            state_data = json.load(f)
+        state_data["steps"]["clipping-publisher"]["params"]["publication_manifest"] = [
+            {"status": "published", "channel_id": "chan-01"}
+        ]
+        with open(self.state_file, "w", encoding="utf-8") as f:
+            json.dump(state_data, f, indent=2)
+
         # Approve final step
         self.run_cli(
             ["approve", "--step", steps[-1], "--dir", str(self.project_dir)],
@@ -581,6 +590,48 @@ class TestClippingStateCLI(unittest.TestCase):
         # Must still contain QC parameters
         self.assertEqual(qc_params.get("target_loudness_lufs"), -14.0)
         self.assertEqual(qc_params.get("caption_closers"), ["closer1", "closer2"])
+
+    def test_approve_step8_without_manifest_fails(self):
+        """Verifies approve --step clipping-publisher rejects with exit code 1 if publication_manifest is missing."""
+        self.run_cli(["init", "--dir", str(self.project_dir)], check=True)
+        res = self.run_cli(["approve", "--step", "clipping-publisher", "--dir", str(self.project_dir)])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("publication_manifest", res.stderr.lower())
+
+    def test_approve_step8_with_force_bypasses_manifest_check(self):
+        """Verifies approve --step clipping-publisher --force succeeds even when publication_manifest is missing."""
+        self.run_cli(["init", "--dir", str(self.project_dir)], check=True)
+        res = self.run_cli(["approve", "--step", "clipping-publisher", "--force", "--dir", str(self.project_dir)])
+        self.assertEqual(res.returncode, 0)
+        with open(self.state_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        self.assertTrue(state["steps"]["clipping-publisher"]["approved"])
+        self.assertEqual(state["steps"]["clipping-publisher"]["status"], "completed")
+
+    def test_approve_step8_with_manifest_succeeds(self):
+        """Verifies approve --step clipping-publisher succeeds with exit code 0 when publication_manifest is present."""
+        self.run_cli(["init", "--dir", str(self.project_dir)], check=True)
+        # Manually inject a publication manifest into step 8 params
+        with open(self.state_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        state["steps"]["clipping-publisher"]["params"]["publication_manifest"] = [
+            {
+                "status": "published",
+                "platform": "YouTube Shorts",
+                "channel_id": "chan-yt-01",
+                "post_url": "https://youtube.com/shorts/test1234",
+            }
+        ]
+        with open(self.state_file, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+
+        res = self.run_cli(["approve", "--step", "clipping-publisher", "--dir", str(self.project_dir)])
+        self.assertEqual(res.returncode, 0)
+        with open(self.state_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        self.assertTrue(state["steps"]["clipping-publisher"]["approved"])
+        self.assertEqual(state["steps"]["clipping-publisher"]["status"], "completed")
+        self.assertIsNotNone(state["steps"]["clipping-publisher"]["completed_at"])
 
 
 if __name__ == "__main__":

@@ -437,6 +437,16 @@ def cmd_approve(args: argparse.Namespace) -> int:
         sys.stderr.write(f"Error: Unknown step '{step_name}'\n")
         return 1
 
+    if step_name == "clipping-publisher":
+        step_params = state.get("steps", {}).get(step_name, {}).get("params", {})
+        pub_manifest = step_params.get("publication_manifest")
+        if not pub_manifest and not getattr(args, "force", False):
+            sys.stderr.write(
+                "Error: Cannot approve 'clipping-publisher' without publication_manifest. "
+                "Execute 'scripts/clipping_publisher.py publish' first, or pass --force.\n"
+            )
+            return 1
+
     overrides_dict: Dict[str, Any] = {}
     if args.override:
         for item in args.override:
@@ -646,6 +656,11 @@ def main() -> None:
     p_approve.add_argument("--notes", default=None, help="Approval notes")
     p_approve.add_argument("--by", default="human", help="Approver identity")
     p_approve.add_argument("--dir", default=None, help="Target project directory")
+    p_approve.add_argument(
+        "--force",
+        action="store_true",
+        help="Force approve step bypassing validation checks",
+    )
 
     # get-step-config
     p_get = subparsers.add_parser("get-step-config", help="Get step configuration slice")
