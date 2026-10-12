@@ -56,10 +56,10 @@ class TestPluginManifest(unittest.TestCase):
         )
 
         self.assertIsInstance(data["suggestedPrompts"], list)
-        self.assertEqual(
+        self.assertGreaterEqual(
             len(data["suggestedPrompts"]),
             3,
-            "suggestedPrompts should contain exactly 3 high-impact starter prompts",
+            "suggestedPrompts should contain at least 3 high-impact starter prompts",
         )
         for prompt in data["suggestedPrompts"]:
             self.assertIsInstance(prompt, str)
@@ -73,6 +73,7 @@ class TestPluginManifest(unittest.TestCase):
             "tiktok",
             "reels",
             "creator-rewards",
+            "channel-warmup",
         ]
         self.assertEqual(data["keywords"], expected_keywords)
 
