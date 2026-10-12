@@ -3,9 +3,9 @@
 > **File**: `references/CHANNEL_PORTFOLIO_SCHEMA.md`  
 > **Source**: Antigravity Short-Form Clipping Pipeline Plugin  
 > **Architecture Decision Records**:  
-> - [ADR 0001: Workspace-Level Channel Portfolio Registry](../docs/adr/0001-workspace-level-channel-portfolio-registry.md)  
-> - [ADR 0002: Health-Gated Channel Warmup Advancement](../docs/adr/0002-health-gated-warmup-advancement.md)  
-> - [ADR 0003: Automated Device Delivery for Mobile-Enforced Platforms](../docs/adr/0003-automated-device-delivery.md)  
+> - [ADR 0007: Workspace-Level Channel Portfolio Registry](../docs/adr/0007-workspace-level-channel-portfolio-registry.md)  
+> - [ADR 0008: Health-Gated Channel Warmup Advancement](../docs/adr/0008-health-gated-warmup-advancement.md)  
+> - [ADR 0009: Automated Device Delivery for Mobile-Enforced Platforms](../docs/adr/0009-automated-device-delivery.md)  
 > **Domain Standards**: [GLOSSARY.md](../GLOSSARY.md)
 
 This document defines the authoritative data contract for the workspace-level channel portfolio registry (`channels.json`). All persistent channel identities, warmup lifecycle stages, health gates, daily posting cadences, and device transfer configurations must conform to this schema.
@@ -15,10 +15,10 @@ This document defines the authoritative data contract for the workspace-level ch
 ## 1. Architectural Overview
 
 ### Workspace-Level Registry (`channels.json`)
-Per **ADR 0001**, channel identities and warmup states are decoupled from individual video project timelines (`.clipping_state.json`). They are stored in a centralized workspace-level `channels.json` registry file. Video clipping runs query this registry during posting allocation (Step 7 packaging) to identify eligible destination channels with available daily post quota, and update post logs without polluting single-video timeline state.
+Per **ADR 0007**, channel identities and warmup states are decoupled from individual video project timelines (`.clipping_state.json`). They are stored in a centralized workspace-level `channels.json` registry file. Video clipping runs query this registry during posting allocation (Step 7 packaging) to identify eligible destination channels with available daily post quota, and update post logs without polluting single-video timeline state.
 
 ### Channel Warmup Lifecycle
-Per **ADR 0002**, short-form platforms (TikTok, Instagram Reels, YouTube Shorts) enforce aggressive algorithmic trust filtering and shadowban mechanisms against newly created or bot-like accounts. Accounts progress through a deterministic 4-stage lifecycle governed by strict behavioral and cadence constraints:
+Per **ADR 0008**, short-form platforms (TikTok, Instagram Reels, YouTube Shorts) enforce aggressive algorithmic trust filtering and shadowban mechanisms against newly created or bot-like accounts. Accounts progress through a deterministic 4-stage lifecycle governed by strict behavioral and cadence constraints:
 
 1. **`Cold Lurker`**: Newly registered account (Day 1–3). 
    - 0 posts allowed (`daily_post_limit: 0`).
@@ -34,12 +34,12 @@ Per **ADR 0002**, short-form platforms (TikTok, Instagram Reels, YouTube Shorts)
    - High algorithmic trust, reliable distribution into the FYP / Shorts feed.
 
 ### Health-Gated Advancement & Suppression Protection
-Per **ADR 0002**, accounts in `Seeding` cannot advance to `Ramp-Up` solely based on elapsed calendar time. An account must clear an empirical **Health Gate**:
+Per **ADR 0008**, accounts in `Seeding` cannot advance to `Ramp-Up` solely based on elapsed calendar time. An account must clear an empirical **Health Gate**:
 - **Baseline View Distribution**: Videos must clear 200–500 views without suppression, proving the account is not suffering from a 0-view shadowban or algorithmic penalty.
 - **`Account Cooldown`**: If view suppression or a 0-view shadowban is detected, the channel is immediately transitioned into an `Account Cooldown` state (or `cooldown` status). A mandatory 72-hour zero-posting cooldown is triggered, accompanied by non-posting algorithmic browsing, before re-testing.
 
 ### Automated Device Transfer Protocols
-Per **ADR 0003**, paid clipping reward programs and platform anti-spam rules strictly prohibit automated API uploads on TikTok and Instagram Reels (`api_upload_allowed: false`). Rendered clips must be manually published from mobile devices. To eliminate manual friction between desktop rendering and mobile publishing, each channel configures a **Device Transfer Protocol**:
+Per **ADR 0009**, paid clipping reward programs and platform anti-spam rules strictly prohibit automated API uploads on TikTok and Instagram Reels (`api_upload_allowed: false`). Rendered clips must be manually published from mobile devices. To eliminate manual friction between desktop rendering and mobile publishing, each channel configures a **Device Transfer Protocol**:
 - `qr_code`: Zero-dependency local HTTP QR code download server accessible from mobile browser on the local network.
 - `adb_push`: Automated Android Debug Bridge file transfer pushing rendered MP4 directly to the device's DCIM / Camera gallery.
 - `telegram_dispatch`: Automated delivery of the video package and caption text directly to a designated Telegram bot or chat.

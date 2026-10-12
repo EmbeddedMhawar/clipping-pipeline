@@ -7,7 +7,7 @@ description: Orchestrate short-form clipping pipeline and execution workflow acr
 
 Master router and orchestrator for the 7-step short-form video clipping pipeline. Inspects campaign state, validates pre-flight transition gates, prevents premature execution across unapproved stages, isolates configuration load, and manages dispatch across all editing phases. Bridges workspace-level channel portfolio and warmup lifecycles (`channels.json`) into Step 7 packaging and automated mobile device delivery.
 
-For campaign rules and data contracts, see [`references/CAMPAIGN_BRIEF_SCHEMA.md`](../../references/CAMPAIGN_BRIEF_SCHEMA.md). For channel portfolio schema, see [`references/CHANNEL_PORTFOLIO_SCHEMA.md`](../../references/CHANNEL_PORTFOLIO_SCHEMA.md). For architectural decisions, see [`docs/adr/0001-workspace-level-channel-portfolio-registry.md`](../../docs/adr/0001-workspace-level-channel-portfolio-registry.md), [`docs/adr/0002-health-gated-warmup-advancement.md`](../../docs/adr/0002-health-gated-warmup-advancement.md), and [`docs/adr/0003-automated-device-delivery.md`](../../docs/adr/0003-automated-device-delivery.md). For step-isolated execution parameters, query `scripts/clipping_state.py get-step-config`.
+For campaign rules and data contracts, see [`references/CAMPAIGN_BRIEF_SCHEMA.md`](../../references/CAMPAIGN_BRIEF_SCHEMA.md). For channel portfolio schema, see [`references/CHANNEL_PORTFOLIO_SCHEMA.md`](../../references/CHANNEL_PORTFOLIO_SCHEMA.md). For architectural decisions, see [`docs/adr/0007-workspace-level-channel-portfolio-registry.md`](../../docs/adr/0007-workspace-level-channel-portfolio-registry.md), [`docs/adr/0008-health-gated-warmup-advancement.md`](../../docs/adr/0008-health-gated-warmup-advancement.md), and [`docs/adr/0009-automated-device-delivery.md`](../../docs/adr/0009-automated-device-delivery.md). For step-isolated execution parameters, query `scripts/clipping_state.py get-step-config`.
 
 ---
 
@@ -95,7 +95,7 @@ python3 scripts/clipping_state.py get-step-config --step <target-step> --dir <pr
 Consult [`references/CAMPAIGN_BRIEF_SCHEMA.md`](../../references/CAMPAIGN_BRIEF_SCHEMA.md) for full schema definitions and allowable parameters. Provide the resulting JSON payload directly to the executing step subagent.
 
 #### Step 7 Channel Portfolio Bridge & Device Delivery
-When retrieving configuration for Step 7 (`clipping-qc-packager`), the state engine dynamically queries `channels.json` (per ADR 0001, ADR 0002, ADR 0003):
+When retrieving configuration for Step 7 (`clipping-qc-packager`), the state engine dynamically queries `channels.json` (per ADR 0007, ADR 0008, ADR 0009):
 - **`eligible_channels`**: Accounts filtered to match campaign target platforms, verifying `health_status != 'cooldown'` (and not in `Account Cooldown` stage or suppression), and verifying remaining daily capacity (`posts_today < daily_post_cap` / `daily_post_limit`).
 - **`ineligible_channels`**: Accounts currently in cooldown or at daily post limits are flagged as ineligible with explicit reasons (e.g. suppression cooldown, daily capacity reached, platform mismatch).
 - **`device_transfer`**: Automated mobile device transfer configurations (`qr_code`, `adb_push`, `telegram_dispatch`, `cloud_sync`) from `channels.json` are passed into the Step 7 slice to eliminate friction for mobile-enforced platforms (`api_upload_allowed: false`).

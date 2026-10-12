@@ -7,7 +7,7 @@ description: Manage workspace channel portfolio, multi-platform account warmup l
 
 Workspace-level companion skill for the Short-Form Clipping Pipeline. Governs persistent channel identities, multi-platform warmup lifecycles, empirical health gates, daily posting cadences, and automated device transfer protocols for mobile-enforced social platforms.
 
-See [`references/CHANNEL_PORTFOLIO_SCHEMA.md`](../../references/CHANNEL_PORTFOLIO_SCHEMA.md) for authoritative schema specifications, [`GLOSSARY.md`](../../GLOSSARY.md) for domain terminology, and architecture decisions in [`docs/adr/0001-workspace-level-channel-portfolio-registry.md`](../../docs/adr/0001-workspace-level-channel-portfolio-registry.md), [`docs/adr/0002-health-gated-warmup-advancement.md`](../../docs/adr/0002-health-gated-warmup-advancement.md), and [`docs/adr/0003-automated-device-delivery.md`](../../docs/adr/0003-automated-device-delivery.md).
+See [`references/CHANNEL_PORTFOLIO_SCHEMA.md`](../../references/CHANNEL_PORTFOLIO_SCHEMA.md) for authoritative schema specifications, [`GLOSSARY.md`](../../GLOSSARY.md) for domain terminology, and architecture decisions in [`docs/adr/0007-workspace-level-channel-portfolio-registry.md`](../../docs/adr/0007-workspace-level-channel-portfolio-registry.md), [`docs/adr/0008-health-gated-warmup-advancement.md`](../../docs/adr/0008-health-gated-warmup-advancement.md), and [`docs/adr/0009-automated-device-delivery.md`](../../docs/adr/0009-automated-device-delivery.md).
 
 ---
 
@@ -37,7 +37,7 @@ When onboarding a creator or setting up a workspace portfolio, conduct a structu
    - If an account has experienced an abrupt drop to 0 views or algorithmic penalty, flag it immediately for `Account Cooldown`.
 
 4. **Preferred Device Transfer Discovery**:
-   Identify the creator's preferred delivery mechanism for manual mobile posting (per ADR 0003, mobile-enforced platforms prohibit API uploads):
+   Identify the creator's preferred delivery mechanism for manual mobile posting (per ADR 0009, mobile-enforced platforms prohibit API uploads):
    - `local_qr`: Zero-dependency local QR code download server accessible from mobile browser on the local Wi-Fi network.
    - `adb_push`: Direct USB/wireless file push via Android Debug Bridge into the mobile device gallery (`/sdcard/DCIM/Camera/`).
    - `cloud_folder`: Synchronized local/cloud folder (Nextcloud, Dropbox, Google Drive) mounted on creator's mobile device.
@@ -96,7 +96,7 @@ Present this diagnostic report to the user to align on active posting capacity b
 
 ### 4. 4-Stage Warmup Protocol & Daily Task Checklists
 
-Per **ADR 0002**, short-form algorithms enforce trust filtering. Accounts advance through a deterministic 4-stage lifecycle governed by strict behavioral and cadence constraints:
+Per **ADR 0008**, short-form algorithms enforce trust filtering. Accounts advance through a deterministic 4-stage lifecycle governed by strict behavioral and cadence constraints:
 
 | Stage | Lifecycle Window | Daily Post Limit | Min Post Spacing | Daily Warmup Protocol Checklist |
 | :--- | :--- | :--- | :--- | :--- |
@@ -203,23 +203,6 @@ python3 scripts/clipping_channels.py transfer \
   --method webhook \
   --target "http://127.0.0.1:8080/telegram_webhook"
 ```
-
----
-
-## CLI Commands Reference
-
-All portfolio operations are executed via `scripts/clipping_channels.py`:
-
-| Command | Usage | Description |
-| :--- | :--- | :--- |
-| `init` | `python3 scripts/clipping_channels.py init [--dir <dir>] [--workspace-id <id>] [--force]` | Initialize a new `channels.json` registry |
-| `add` | `python3 scripts/clipping_channels.py add --platform <platform> --handle <handle> [--stage <stage>] [--account-name <name>] [--id <id>]` | Register a new channel account |
-| `audit` | `python3 scripts/clipping_channels.py audit [--output-artifact <file.md>]` | Audit channel portfolio status and output diagnostic report |
-| `daily-tasks` | `python3 scripts/clipping_channels.py daily-tasks [--json]` | Generate daily warmup routines and posting agenda |
-| `advance-stage` | `python3 scripts/clipping_channels.py advance-stage --id <id> [--views <views>] [--force]` | Advance channel lifecycle stage enforcing Health Gate checks |
-| `cooldown` | `python3 scripts/clipping_channels.py cooldown --id <id> [--hours <hours>] [--reason <reason>]` | Trigger 72-hour zero-posting Account Cooldown |
-| `log-post` | `python3 scripts/clipping_channels.py log-post --id <id> [--clip-id <id>] [--project <slug>] [--views <views>] [--force]` | Log clip publication and enforce daily posting cadence |
-| `transfer` | `python3 scripts/clipping_channels.py transfer --clip <path> [--channel <id>] [--method <method>] [--target <target>] [--dry-run]` | Deliver rendered video clip to mobile device |
 
 ---
 
