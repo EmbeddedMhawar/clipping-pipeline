@@ -469,6 +469,9 @@ def main() -> None:
         raw_text = raw_file.read_text(encoding="utf-8")
         brief, _ = parse_raw_guidelines_text(raw_text)
     elif args.url:
+        sys.stderr.write(
+            "[Notice] --url uses unauthenticated HTTP fetching. For authenticated creator dashboards (Whop, Notion, Google Docs), use BrowserOS Neo to save raw_guidelines.md first.\n"
+        )
         if not (args.url.startswith("http://") or args.url.startswith("https://")):
             sys.stderr.write(f"Error: URL must begin with http:// or https://: {args.url}\n")
             sys.exit(1)

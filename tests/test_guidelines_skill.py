@@ -453,6 +453,10 @@ Every edit gets posted once.
             self.assertTrue(out_brief.is_file())
             self.assertTrue(out_art.is_file())
 
+            self.assertIn(
+                "[Notice] --url uses unauthenticated HTTP fetching. For authenticated creator dashboards (Whop, Notion, Google Docs), use BrowserOS Neo to save raw_guidelines.md first.",
+                res.stderr,
+            )
             with open(out_brief, "r", encoding="utf-8") as f:
                 brief = json.load(f)
             self.assertEqual(brief["campaign"]["title"], "Remote Stream Clipping Campaign")
@@ -472,7 +476,42 @@ Every edit gets posted once.
         ]
         res = subprocess.run(cmd, capture_output=True, text=True)
         self.assertNotEqual(res.returncode, 0)
+        self.assertIn(
+            "[Notice] --url uses unauthenticated HTTP fetching. For authenticated creator dashboards (Whop, Notion, Google Docs), use BrowserOS Neo to save raw_guidelines.md first.",
+            res.stderr,
+        )
         self.assertIn("must begin with http:// or https://", res.stderr)
+
+    def test_raw_guidelines_md_file_ingestion(self):
+        raw_path = self.project_dir / "raw_guidelines.md"
+        raw_path.write_text(self.SAMPLE_GUIDELINES, encoding="utf-8")
+
+        out_brief = self.project_dir / "campaign_brief.json"
+        out_artifact = self.project_dir / "campaign_brief_review.md"
+
+        cmd = [
+            sys.executable,
+            str(self.ingest_script),
+            "--file",
+            str(raw_path),
+            "--dir",
+            str(self.project_dir),
+            "--output-brief",
+            str(out_brief),
+            "--output-artifact",
+            str(out_artifact),
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"Ingestion failed: {res.stderr}\nStdout: {res.stdout}")
+        self.assertTrue(out_brief.is_file(), "campaign_brief.json was not created")
+        self.assertTrue(out_artifact.is_file(), "campaign_brief_review.md was not created")
+
+        with open(out_brief, "r", encoding="utf-8") as f:
+            brief = json.load(f)
+
+        self.assertEqual(brief.get("campaign", {}).get("title"), "N3on x MPJ Clipping Campaign")
+        # Notice stderr should NOT contain advisory notice when --file is used
+        self.assertNotIn("[Notice] --url uses unauthenticated HTTP fetching", res.stderr)
 
 
 if __name__ == "__main__":
