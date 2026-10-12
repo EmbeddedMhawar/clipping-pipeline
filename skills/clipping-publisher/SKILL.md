@@ -30,7 +30,7 @@ python3 scripts/clipping_state.py validate --step clipping-publisher --dir <proj
 
 - **Exit Code `0`**: Gate cleared. Proceed to step 2.
 - **Exit Code `2`**: Pre-flight gate blocked. Step 7 (`clipping-qc-packager`) is incomplete or unapproved. Halt publishing immediately.
-- Extract isolated step parameters:
+- Extract isolated Step Slice:
   ```bash
   python3 scripts/clipping_state.py get-step-config --step clipping-publisher --dir <project-dir>
   ```

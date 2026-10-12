@@ -472,7 +472,9 @@ def is_channel_warmed_up(channel: Dict[str, Any]) -> Tuple[bool, str]:
         if posts_today >= daily_post_limit:
             return False, f"Daily post limit reached ({posts_today}/{daily_post_limit} posts today)"
     elif platform == "YouTube Shorts":
-        if "daily_post_limit" in cadence and daily_post_limit > 0:
+        if "daily_post_limit" in cadence:
+            if daily_post_limit <= 0:
+                return False, "Channel has daily_post_limit of 0"
             if posts_today >= daily_post_limit:
                 return False, f"Daily post limit reached ({posts_today}/{daily_post_limit} posts today)"
 
@@ -572,9 +574,14 @@ def check_youtube_token(channel: Dict[str, Any]) -> Tuple[bool, str, str]:
     if default_path.is_file():
         return True, "configured", str(default_path)
 
-    env_var_name = f"YOUTUBE_TOKEN_{chan_id.upper().replace('-', '_')}"
-    if os.environ.get(env_var_name) or os.environ.get("YOUTUBE_API_KEY"):
-        return True, "configured", f"env:{env_var_name}"
+    env_keys = [
+        f"YOUTUBE_TOKEN_{chan_id.upper().replace('-', '_')}",
+        "YOUTUBE_ACCESS_TOKEN",
+        "YOUTUBE_TOKEN",
+    ]
+    for env_k in env_keys:
+        if os.environ.get(env_k):
+            return True, "configured", f"env:{env_k}"
 
     return False, "missing", str(default_path)
 

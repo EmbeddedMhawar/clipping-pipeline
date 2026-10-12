@@ -269,7 +269,7 @@ class TestChannelsPipelineBridge(unittest.TestCase):
         self.assertIn("target_loudness_lufs", config)
 
     def test_ingest_brief_does_not_inject_channels_into_step7_state(self):
-        """cmd_ingest_brief does not inject channel slices into clipping-qc-packager step parameters."""
+        """cmd_ingest_brief does not inject channel slices into clipping-qc-packager Step Slice."""
         brief_path = self._create_sample_brief()
         self._ingest_brief(brief_path)
 
@@ -284,8 +284,8 @@ class TestChannelsPipelineBridge(unittest.TestCase):
         self.assertNotIn("default_device_transfer", qc_params)
 
 
-    def test_skill_doc_describes_portfolio_bridge_and_step7_delivery(self):
-        """skills/clipping-pipeline/SKILL.md documents the portfolio bridge and Step 7 device delivery."""
+    def test_skill_doc_describes_portfolio_bridge_and_device_delivery(self):
+        """skills/clipping-pipeline/SKILL.md documents the portfolio bridge and publishing device delivery."""
         skill_file = SKILLS_DIR / "SKILL.md"
         self.assertTrue(skill_file.is_file(), f"SKILL.md missing at {skill_file}")
         content = skill_file.read_text(encoding="utf-8")
