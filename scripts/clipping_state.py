@@ -39,6 +39,7 @@ PIPELINE_STEPS: List[str] = [
     "clipping-captions",
     "clipping-vfx-sfx",
     "clipping-qc-packager",
+    "clipping-publisher",
 ]
 
 PREFLIGHT_PREREQUISITES: Dict[str, Tuple[Optional[str], str]] = {
@@ -69,6 +70,10 @@ PREFLIGHT_PREREQUISITES: Dict[str, Tuple[Optional[str], str]] = {
     "clipping-qc-packager": (
         "clipping-vfx-sfx",
         "VFX/SFX must be completed before final QC and packaging.",
+    ),
+    "clipping-publisher": (
+        "clipping-qc-packager",
+        "Final QC packaging must be completed before distribution/publishing.",
     ),
 }
 
@@ -140,133 +145,6 @@ def _resolve_channels_path(
     if cand_cwd.is_file():
         return cand_cwd
     return None
-
-
-def _bridge_step7_channels(
-    step_params: Dict[str, Any], state: Dict[str, Any], channels_file: Optional[Path]
-) -> Dict[str, Any]:
-    default_dt = {
-        "protocol": "qr_code",
-        "target": "http://127.0.0.1:8080",
-        "enabled": True,
-    }
-
-    if not channels_file or not channels_file.is_file():
-        step_params.setdefault("eligible_channels", [])
-        step_params.setdefault("ineligible_channels", [])
-        step_params.setdefault("default_device_transfer", default_dt)
-        step_params.setdefault("device_transfer", default_dt)
-        return step_params
-
-    try:
-        with open(channels_file, "r", encoding="utf-8") as f:
-            portfolio = json.load(f)
-    except Exception as e:
-        sys.stderr.write(f"Warning: Failed to load {channels_file}: {e}\n")
-        step_params.setdefault("eligible_channels", [])
-        step_params.setdefault("ineligible_channels", [])
-        step_params.setdefault("default_device_transfer", default_dt)
-        step_params.setdefault("device_transfer", default_dt)
-        return step_params
-
-    default_dt = portfolio.get("default_device_transfer", default_dt)
-    step_params["default_device_transfer"] = default_dt
-    step_params["device_transfer"] = default_dt
-
-    campaign = state.get("campaign", {})
-    raw_campaign_platforms = campaign.get("platforms")
-    if not raw_campaign_platforms:
-        raw_campaign_platforms = (
-            state.get("steps", {})
-            .get("clipping-guidelines", {})
-            .get("params", {})
-            .get("platforms", [])
-        )
-    if not raw_campaign_platforms:
-        raw_campaign_platforms = ["TikTok", "Instagram Reels", "YouTube Shorts"]
-
-    campaign_platforms_normalized = {
-        _normalize_platform(p).lower() for p in raw_campaign_platforms
-    }
-
-    eligible_channels: List[Dict[str, Any]] = []
-    ineligible_channels: List[Dict[str, Any]] = []
-
-    for chan in portfolio.get("channels", []):
-        chan_copy = copy.deepcopy(chan)
-        if "device_transfer" not in chan_copy:
-            chan_copy["device_transfer"] = copy.deepcopy(default_dt)
-
-        chan_id = chan_copy.get("id", "unknown")
-        raw_platform = chan_copy.get("platform", "")
-        norm_platform = _normalize_platform(raw_platform)
-        stage = chan_copy.get("stage", "")
-        status = chan_copy.get("status", "active")
-        health_status = chan_copy.get("health_status", status)
-
-        cadence = chan_copy.get("posting_cadence", {})
-        posts_today = cadence.get("posts_today", 0)
-        daily_post_cap = cadence.get("daily_post_limit", cadence.get("daily_post_cap", 0))
-
-        cooldown_data = chan_copy.get("cooldown", {})
-        in_cooldown = (
-            status == "cooldown"
-            or health_status == "cooldown"
-            or stage == "Account Cooldown"
-            or cooldown_data.get("in_cooldown") is True
-            or chan_copy.get("health_gate", {}).get("suppression_detected") is True
-        )
-
-        # Condition 1: Matching platform
-        if norm_platform.lower() not in campaign_platforms_normalized:
-            ineligible_channels.append(
-                {
-                    "id": chan_id,
-                    "platform": raw_platform,
-                    "handle": chan_copy.get("handle", ""),
-                    "reason": f"Platform mismatch: platform '{raw_platform}' is not in campaign target platforms ({list(raw_campaign_platforms)})",
-                    "channel": chan_copy,
-                }
-            )
-            continue
-
-        # Condition 2: health_status != 'cooldown' and not in cooldown
-        if in_cooldown:
-            cd_reason = cooldown_data.get("reason") or "72h account suppression cooldown active"
-            ineligible_channels.append(
-                {
-                    "id": chan_id,
-                    "platform": raw_platform,
-                    "handle": chan_copy.get("handle", ""),
-                    "reason": f"Account in cooldown: {cd_reason}",
-                    "channel": chan_copy,
-                }
-            )
-            continue
-
-        # Condition 3: posts_today < daily_post_cap
-        if posts_today >= daily_post_cap:
-            if stage == "Cold Lurker" or daily_post_cap == 0:
-                reason_str = f"Daily post capacity reached: {stage} stage permits 0 posts per day (daily post limit: 0)"
-            else:
-                reason_str = f"Daily post capacity reached ({posts_today}/{daily_post_cap} posts published today, daily post limit reached)"
-            ineligible_channels.append(
-                {
-                    "id": chan_id,
-                    "platform": raw_platform,
-                    "handle": chan_copy.get("handle", ""),
-                    "reason": reason_str,
-                    "channel": chan_copy,
-                }
-            )
-            continue
-
-        # Passed all 3 criteria -> Eligible
-        eligible_channels.append(chan_copy)
-
-    step_params["eligible_channels"] = eligible_channels
-    step_params["ineligible_channels"] = ineligible_channels
-    return step_params
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -518,11 +396,6 @@ def cmd_ingest_brief(args: argparse.Namespace) -> int:
     }
     state["guidelines_approved"] = False
 
-    channels_file = _resolve_channels_path(
-        state_path.parent, getattr(args, "channels", None)
-    )
-    qc_packager_slice = _bridge_step7_channels(qc_packager_slice, state, channels_file)
-
     if "steps" not in state:
         state["steps"] = {}
 
@@ -534,6 +407,7 @@ def cmd_ingest_brief(args: argparse.Namespace) -> int:
         "clipping-captions": captions_slice,
         "clipping-vfx-sfx": vfx_sfx_slice,
         "clipping-qc-packager": qc_packager_slice,
+        "clipping-publisher": {},
     }
 
     for step_name in PIPELINE_STEPS:
@@ -617,12 +491,6 @@ def cmd_get_step_config(args: argparse.Namespace) -> int:
         return 1
 
     step_params = copy.deepcopy(state["steps"][step_name].get("params", {}))
-
-    if step_name == "clipping-qc-packager":
-        channels_file = _resolve_channels_path(
-            state_path.parent, getattr(args, "channels", None)
-        )
-        step_params = _bridge_step7_channels(step_params, state, channels_file)
 
     print(json.dumps(step_params, indent=2, ensure_ascii=False))
     return 0
