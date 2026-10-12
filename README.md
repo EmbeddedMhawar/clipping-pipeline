@@ -21,40 +21,40 @@ The pipeline unifies two proven frameworks:
 The pipeline executes as a sequential, gated 7-step process. Downstream editing subagents are blocked until upstream steps and pre-flight gates are validated and approved.
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        CLIPPING PIPELINE WORKFLOW                           │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  [Step 1: clipping-guidelines]                                              │
-│   - Ingests raw campaign brief (Markdown, URL, or Prompt)                   │
-│   - Normalizes into campaign_brief.json & injects Tier-1 viral defaults     │
-│   - Generates interactive review artifact & requests human approval         │
-│                              │                                              │
-│                              ▼  (Pre-flight Gate: guidelines_approved)       │
-│  [Step 2: clipping-transcription]                                           │
-│   - Speaker diarization, word-level timestamps, phonetic dictionary         │
-│                              │                                              │
-│                              ▼                                              │
-│  [Step 3: clipping-hook-hunter]                                              │
-│   - 0-3s high-stakes hook discovery, curiosity gaps, 20-60s bounds          │
-│                              │                                              │
-│                              ▼                                              │
-│  [Step 4: clipping-assembly]                                                │
-│   - 1080x1920 (9:16) smart-center layout, speaker x-anchors, dead air cut   │
-│                              │                                              │
-│                              ▼                                              │
-│  [Step 5: clipping-captions]                                                │
-│   - Kinetic word-by-word subtitles in mic/chest safe zone (margin_v: 420)   │
-│                              │                                              │
-│                              ▼                                              │
-│  [Step 6: clipping-vfx-sfx]                                                 │
-│   - Persistent official watermark placement, transient SFX, zero music bed  │
-│                              │                                              │
-│                              ▼                                              │
-│  [Step 7: clipping-qc-packager]                                             │
-│   - EBU R128 -14 LUFS loudness check, 12 approved closers, Whop metadata    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                    CLIPPING PIPELINE WORKFLOW                                   │
+├─────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                                 │
+│  [Step 1: clipping-guidelines]                                                                  │
+│   - Ingests raw campaign brief (Markdown file, BrowserOS Neo raw_guidelines.md, or Prompt text) │
+│   - Normalizes into campaign_brief.json & injects Tier-1 viral defaults                         │
+│   - Generates interactive review artifact & requests human approval                             │
+│                              │                                                                  │
+│                              ▼  (Pre-flight Gate: guidelines_approved)                          │
+│  [Step 2: clipping-transcription]                                                               │
+│   - Speaker diarization, word-level timestamps, phonetic dictionary                             │
+│                              │                                                                  │
+│                              ▼                                                                  │
+│  [Step 3: clipping-hook-hunter]                                                                 │
+│   - 0-3s high-stakes hook discovery, curiosity gaps, 20-60s bounds                              │
+│                              │                                                                  │
+│                              ▼                                                                  │
+│  [Step 4: clipping-assembly]                                                                    │
+│   - 1080x1920 (9:16) smart-center layout, speaker x-anchors, dead air cut                       │
+│                              │                                                                  │
+│                              ▼                                                                  │
+│  [Step 5: clipping-captions]                                                                    │
+│   - Kinetic word-by-word subtitles in mic/chest safe zone (margin_v: 420)                       │
+│                              │                                                                  │
+│                              ▼                                                                  │
+│  [Step 6: clipping-vfx-sfx]                                                                     │
+│   - Persistent official watermark placement, transient SFX, zero music bed                      │
+│                              │                                                                  │
+│                              ▼                                                                  │
+│  [Step 7: clipping-qc-packager]                                                                 │
+│   - EBU R128 -14 LUFS loudness check, 12 approved closers, Whop metadata                        │
+│                                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### The 7 Steps:
@@ -73,7 +73,7 @@ The pipeline executes as a sequential, gated 7-step process. Downstream editing 
 ### 1. Ingest Guidelines & Normalize Brief (`scripts/ingest_guidelines.py`)
 
 ```bash
-# Ingest raw markdown guidelines, inject Tier-1 defaults, and update state
+# Ingest raw markdown guidelines (or BrowserOS Neo raw_guidelines.md), inject Tier-1 defaults, and update state
 python3 scripts/ingest_guidelines.py --file CAMPAIGN_GUIDELINES.md --dir /path/to/project
 
 # Generate review artifact for user approval gate

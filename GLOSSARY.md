@@ -31,3 +31,8 @@ _Avoid_: Sub-skill, worker skill, task script
 **Tier-1 Safe Default**:
 A baseline viral parameter (e.g. 25s–45s duration, 0–3s hook) automatically injected when a campaign brief is silent on a requirement.
 _Avoid_: Fallback setting, system preset
+
+**Web Brief Ingestion**:
+The process of extracting campaign rules and payout tables from authenticated creator dashboards (e.g. Whop, Notion) using the dedicated agent browser (`BrowserOS Neo`) and saving them to `raw_guidelines.md`.
+_Avoid_: Web scraping, headless scraping, URL pulling
+

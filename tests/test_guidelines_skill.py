@@ -22,6 +22,11 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 REFERENCES_DIR = REPO_ROOT / "references"
 SKILLS_DIR = REPO_ROOT / "skills" / "clipping-guidelines"
 
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.ingest_guidelines import URL_DEPRECATION_ADVISORY
+
 
 class TestCampaignBriefSchema(unittest.TestCase):
     """Verifies references/CAMPAIGN_BRIEF_SCHEMA.md exists and defines valid schema."""
@@ -453,6 +458,10 @@ Every edit gets posted once.
             self.assertTrue(out_brief.is_file())
             self.assertTrue(out_art.is_file())
 
+            self.assertIn(
+                URL_DEPRECATION_ADVISORY,
+                res.stderr,
+            )
             with open(out_brief, "r", encoding="utf-8") as f:
                 brief = json.load(f)
             self.assertEqual(brief["campaign"]["title"], "Remote Stream Clipping Campaign")
@@ -472,7 +481,42 @@ Every edit gets posted once.
         ]
         res = subprocess.run(cmd, capture_output=True, text=True)
         self.assertNotEqual(res.returncode, 0)
+        self.assertIn(
+            URL_DEPRECATION_ADVISORY,
+            res.stderr,
+        )
         self.assertIn("must begin with http:// or https://", res.stderr)
+
+    def test_raw_guidelines_md_file_ingestion(self):
+        raw_path = self.project_dir / "raw_guidelines.md"
+        raw_path.write_text(self.SAMPLE_GUIDELINES, encoding="utf-8")
+
+        out_brief = self.project_dir / "campaign_brief.json"
+        out_artifact = self.project_dir / "campaign_brief_review.md"
+
+        cmd = [
+            sys.executable,
+            str(self.ingest_script),
+            "--file",
+            str(raw_path),
+            "--dir",
+            str(self.project_dir),
+            "--output-brief",
+            str(out_brief),
+            "--output-artifact",
+            str(out_artifact),
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"Ingestion failed: {res.stderr}\nStdout: {res.stdout}")
+        self.assertTrue(out_brief.is_file(), "campaign_brief.json was not created")
+        self.assertTrue(out_artifact.is_file(), "campaign_brief_review.md was not created")
+
+        with open(out_brief, "r", encoding="utf-8") as f:
+            brief = json.load(f)
+
+        self.assertEqual(brief.get("campaign", {}).get("title"), "N3on x MPJ Clipping Campaign")
+        # Stderr should NOT contain advisory notice when --file is used
+        self.assertNotIn(URL_DEPRECATION_ADVISORY, res.stderr)
 
 
 if __name__ == "__main__":
