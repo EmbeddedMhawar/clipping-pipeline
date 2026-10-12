@@ -233,8 +233,10 @@ def parse_raw_guidelines_text(text: str) -> Tuple[Dict[str, Any], List[str]]:
 
     # Audio
     audio_rule = dict(COLE_CORCORAN_DEFAULTS["audio"])
-    if "phonk" not in text.lower() and "background music" not in text.lower() and "lufs" not in text.lower():
-        defaults_applied.append("audio: dialogue normalized to -14 LUFS, zero background music beds [Default Applied]")
+    if "lufs" not in text.lower():
+        defaults_applied.append("audio: dialogue normalized to -14 LUFS [Default Applied]")
+    if "phonk" not in text.lower() and "background music" not in text.lower():
+        defaults_applied.append("audio: zero background music beds and zero phonk [Default Applied]")
 
     # Prohibited Edits
     prohibited_edits = list(COLE_CORCORAN_DEFAULTS["prohibited_edits"])
@@ -410,7 +412,14 @@ def main() -> None:
         description="Ingest, normalize, and format campaign clipping guidelines."
     )
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--file", "-f", help="Path to raw markdown or text guidelines file")
+    group.add_argument(
+        "--file",
+        "-f",
+        "--input",
+        "-i",
+        dest="file",
+        help="Path to raw markdown or text guidelines file",
+    )
     group.add_argument("--text", "-t", help="Raw guidelines text string")
     group.add_argument("--brief", "-b", help="Existing campaign_brief.json to review/update")
 
@@ -473,11 +482,14 @@ def main() -> None:
     # 3. Generate review artifact
     artifact_content = format_review_artifact(brief)
 
-    if args.output_artifact:
-        art_path = Path(args.output_artifact).resolve()
-        art_path.parent.mkdir(parents=True, exist_ok=True)
-        art_path.write_text(artifact_content, encoding="utf-8")
-        print(f"Review artifact written to {art_path}")
+    art_path = (
+        Path(args.output_artifact).resolve()
+        if args.output_artifact
+        else project_dir / "campaign_brief_review.md"
+    )
+    art_path.parent.mkdir(parents=True, exist_ok=True)
+    art_path.write_text(artifact_content, encoding="utf-8")
+    print(f"Review artifact written to {art_path}")
 
     if args.print_artifact:
         print("\n" + "=" * 80)
