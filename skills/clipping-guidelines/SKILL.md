@@ -19,7 +19,13 @@ Follow these sequential steps on every invocation:
 Identify the source format provided by the user:
 - **Local Workspace File**: If the user points to a markdown file (e.g. `CAMPAIGN_GUIDELINES.md`), read it via `view_file`.
 - **Pasted Text**: If guidelines or campaign requirements are provided directly in the prompt, pass the text string.
-- **Remote Web Page or API**: If a URL is provided (e.g. Notion doc, Google Doc, Whop link), pass `--url` to `scripts/ingest_guidelines.py` or fetch contents using `read_url_content`.
+- **Remote Web Brief (Whop, Notion, Google Docs, Creator Dashboards)**: Mandate the dedicated agent browser (`BrowserOS Neo`) for all remote web campaign briefs. Do not use headless scrapers, curl, or in-app fetchers. Follow BrowserOS Neo etiquette:
+  1. Call `name_session` early with a 2-3 word task label (e.g. `clipping/<project-slug>`), category `work`, and a concise summary.
+  2. Open a dedicated tab via `tabs` with action `"new"`. Work only in task-owned tabs.
+  3. Navigate to the campaign URL and extract the page markdown using `read` or `run`.
+  4. Save the extracted markdown to `<project-dir>/raw_guidelines.md`.
+  5. Pass `--file <project-dir>/raw_guidelines.md` to `scripts/ingest_guidelines.py`.
+  6. **Disconnection Protocol**: If BrowserOS Neo reports session disconnected, prompt the user to start BrowserOS Neo and check the cockpit; DO NOT silently fall back to headless fetchers.
 
 ### 2. Normalize and Inject Tier-1 Defaults
 Execute the ingestion normalizer:
@@ -30,18 +36,18 @@ python3 scripts/ingest_guidelines.py \
   --output-brief <project-dir>/campaign_brief.json \
   --output-artifact <project-dir>/campaign_brief_review.md
 ```
-Or for inline text:
+Or for web briefs extracted via BrowserOS Neo:
 ```bash
 python3 scripts/ingest_guidelines.py \
-  --text "<raw-guidelines-text>" \
+  --file <project-dir>/raw_guidelines.md \
   --dir <project-dir> \
   --output-brief <project-dir>/campaign_brief.json \
   --output-artifact <project-dir>/campaign_brief_review.md
 ```
-Or for remote URLs:
+Or for inline text:
 ```bash
 python3 scripts/ingest_guidelines.py \
-  --url "<url>" \
+  --text "<raw-guidelines-text>" \
   --dir <project-dir> \
   --output-brief <project-dir>/campaign_brief.json \
   --output-artifact <project-dir>/campaign_brief_review.md
