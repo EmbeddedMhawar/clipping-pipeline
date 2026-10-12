@@ -68,7 +68,19 @@ The pipeline executes as a sequential, gated 7-step process. Downstream editing 
 
 ---
 
-## State Engine CLI (`scripts/clipping_state.py`)
+## State Engine & Guidelines Ingestion
+
+### 1. Ingest Guidelines & Normalize Brief (`scripts/ingest_guidelines.py`)
+
+```bash
+# Ingest raw markdown guidelines, inject Tier-1 defaults, and update state
+python3 scripts/ingest_guidelines.py --file CAMPAIGN_GUIDELINES.md --dir /path/to/project
+
+# Generate review artifact for user approval gate
+python3 scripts/ingest_guidelines.py --file CAMPAIGN_GUIDELINES.md --dir /path/to/project --output-artifact campaign_brief_review.md
+```
+
+### 2. State Engine CLI (`scripts/clipping_state.py`)
 
 The pipeline state is deterministically tracked in `.clipping_state.json` by the CLI state engine `scripts/clipping_state.py`:
 
@@ -125,20 +137,21 @@ python3 tests/test_plugin_manifest.py
 clipping-pipeline/
 ├── plugin.json                 # Antigravity plugin manifest
 ├── README.md                   # Plugin documentation
+├── GLOSSARY.md                 # Project domain glossary
 ├── scripts/
 │   ├── clipping_state.py       # State engine CLI & pre-flight gate validator
-│   └── .gitkeep
+│   └── ingest_guidelines.py    # Guidelines normalizer & review artifact generator
 ├── references/
-│   ├── CAMPAIGN_BRIEF_SCHEMA.md# Normalized schema specification
-│   └── .gitkeep
+│   └── CAMPAIGN_BRIEF_SCHEMA.md# Normalized schema specification & JSON schema
 ├── skills/
 │   ├── clipping-pipeline/      # Master orchestrator router skill
 │   │   └── SKILL.md
-│   ├── clipping-guidelines/    # Campaign ingestion & review gate skill
-│   │   └── SKILL.md
-│   └── .gitkeep
+│   └── clipping-guidelines/    # Campaign ingestion & review gate skill
+│       └── SKILL.md
 └── tests/
-    └── test_plugin_manifest.py # Plugin manifest and structure test suite
+    ├── test_plugin_manifest.py # Plugin manifest test suite
+    ├── test_clipping_state.py  # State engine CLI & pre-flight test suite
+    └── test_guidelines_skill.py# Guidelines ingestion & schema test suite
 ```
 
 ---
