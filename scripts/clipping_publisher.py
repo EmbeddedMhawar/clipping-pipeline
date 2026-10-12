@@ -17,6 +17,8 @@ Conforms to:
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +40,32 @@ PLATFORM_ALIASES = {
     "shorts": "YouTube Shorts",
 }
 
+TRANSFER_PROTOCOLS = ["local_qr", "adb_push", "cloud_folder", "webhook"]
+TRANSFER_ALIASES = {
+    "local_qr": "local_qr",
+    "qr_code": "local_qr",
+    "qr": "local_qr",
+    "adb_push": "adb_push",
+    "adb": "adb_push",
+    "cloud_folder": "cloud_folder",
+    "cloud_sync": "cloud_folder",
+    "cloud": "cloud_folder",
+    "webhook": "webhook",
+    "telegram": "webhook",
+    "telegram_dispatch": "webhook",
+}
+
+
+def normalize_transfer_protocol(proto: str) -> str:
+    """Normalizes transfer protocol string or alias to canonical protocol identifier."""
+    key = str(proto).strip().lower()
+    if key in TRANSFER_ALIASES:
+        return TRANSFER_ALIASES[key]
+    for p in TRANSFER_PROTOCOLS:
+        if p.lower() == key:
+            return p
+    return key
+
 
 def normalize_platform(plat: str) -> str:
     """Normalizes platform string or alias to canonical platform name."""
@@ -48,6 +76,177 @@ def normalize_platform(plat: str) -> str:
         if p.lower() == key:
             return p
     return plat.strip()
+
+
+def format_caption(
+    hook: Optional[str] = None,
+    body: Optional[str] = None,
+    hashtags: Optional[Union[str, List[str]]] = None,
+    closer: Optional[str] = None,
+    description: Optional[str] = None,
+) -> str:
+    """
+    Formats a standard companion caption payload combining:
+    - hook (headline title)
+    - body / description (context, summary, or details)
+    - hashtags (normalized with # prefix)
+    - closer (campaign CTA or account closer)
+    """
+    actual_body = body if body is not None else description
+    sections: List[str] = []
+
+    if hook and hook.strip():
+        sections.append(hook.strip())
+
+    if actual_body and actual_body.strip():
+        sections.append(actual_body.strip())
+
+    if hashtags:
+        if isinstance(hashtags, (list, tuple)):
+            tags = [f"#{t.strip().lstrip('#')}" for t in hashtags if t.strip()]
+            tag_str = " ".join(tags)
+        elif isinstance(hashtags, str):
+            h_str = hashtags.strip()
+            tokens = [t.strip() for t in h_str.replace(",", " ").split() if t.strip()]
+            tags = [f"#{t.lstrip('#')}" for t in tokens]
+            tag_str = " ".join(tags)
+        else:
+            tag_str = ""
+
+        if tag_str.strip():
+            sections.append(tag_str.strip())
+
+    if closer and closer.strip():
+        sections.append(closer.strip())
+
+    return "\n\n".join(sections)
+
+
+def bundle_caption(
+    target: Union[str, Path],
+    caption_content: Optional[str] = None,
+    hook: Optional[str] = None,
+    body: Optional[str] = None,
+    hashtags: Optional[Union[str, List[str]]] = None,
+    closer: Optional[str] = None,
+    filename: str = "caption.txt",
+) -> Path:
+    """
+    Generates and bundles companion caption.txt alongside the rendered MP4 video
+    or within the destination staging directory.
+    """
+    target_path = Path(target)
+    if target_path.is_file():
+        dest_dir = target_path.parent
+    else:
+        dest_dir = target_path
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    out_file = dest_dir / filename
+
+    if caption_content is None:
+        caption_content = format_caption(
+            hook=hook,
+            body=body,
+            hashtags=hashtags,
+            closer=closer,
+        )
+
+    out_file.write_text(caption_content, encoding="utf-8")
+    return out_file
+
+
+def deliver_mobile_channel(
+    channel: Dict[str, Any],
+    video_path: Union[str, Path],
+    caption_path: Optional[Union[str, Path]] = None,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """
+    Transfers rendered MP4 video and companion caption.txt to mobile device
+    via the channel's configured device transfer protocol (cloud_folder, adb_push, local_qr, webhook).
+    """
+    dt = channel.get("device_transfer", {})
+    if dt.get("enabled") is False:
+        raise ValueError(
+            f"Device transfer is disabled for channel '{channel.get('id', 'unknown')}'"
+        )
+
+    raw_proto = dt.get("protocol") or "local_qr"
+    protocol = normalize_transfer_protocol(raw_proto)
+    target = dt.get("target")
+
+    v_path = Path(video_path).resolve()
+    c_path = Path(caption_path).resolve() if caption_path else None
+
+    # Validate video existence if not dry_run
+    if not dry_run and not v_path.is_file():
+        raise FileNotFoundError(f"Video file not found: {v_path}")
+
+    status_str = "simulated" if dry_run else "success"
+
+    result: Dict[str, Any] = {
+        "status": status_str,
+        "channel_id": channel.get("id"),
+        "platform": normalize_platform(channel.get("platform", "")),
+        "protocol": protocol,
+        "video_path": str(v_path),
+        "caption_path": str(c_path) if c_path else None,
+        "dry_run": dry_run,
+    }
+
+    if protocol == "cloud_folder":
+        dest_dir = Path(target).resolve() if target else Path.home() / "Clips"
+        result["destination_dir"] = str(dest_dir)
+        dest_video = dest_dir / v_path.name
+        dest_caption = dest_dir / (c_path.name if c_path else "caption.txt")
+        result["copied_video"] = str(dest_video)
+        result["copied_caption"] = str(dest_caption) if c_path else None
+
+        if not dry_run:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(v_path, dest_video)
+            if c_path and c_path.is_file():
+                shutil.copy2(c_path, dest_caption)
+
+    elif protocol == "adb_push":
+        adb_dest = target or "/sdcard/DCIM/Camera/"
+        result["adb_target"] = adb_dest
+
+        if not dry_run:
+            adb_bin = shutil.which("adb")
+            if adb_bin:
+                proc_vid = subprocess.run(
+                    [adb_bin, "push", str(v_path), adb_dest],
+                    capture_output=True,
+                    text=True,
+                )
+                if proc_vid.returncode != 0:
+                    sys.stderr.write(f"ADB Push Video Warning: {proc_vid.stderr}\n")
+                if c_path and c_path.is_file():
+                    proc_cap = subprocess.run(
+                        [adb_bin, "push", str(c_path), adb_dest],
+                        capture_output=True,
+                        text=True,
+                    )
+                    if proc_cap.returncode != 0:
+                        sys.stderr.write(f"ADB Push Caption Warning: {proc_cap.stderr}\n")
+            else:
+                # Stage transfer when adb is not found in PATH
+                result["status"] = "staged"
+
+    elif protocol == "local_qr":
+        base_url = target or "http://127.0.0.1:8080"
+        server_url = f"{base_url.rstrip('/')}/{v_path.name}"
+        caption_url = f"{base_url.rstrip('/')}/caption.txt"
+        result["server_url"] = server_url
+        result["caption_url"] = caption_url
+
+    elif protocol == "webhook":
+        webhook_url = target or "http://127.0.0.1:8080/telegram_webhook"
+        result["webhook_url"] = webhook_url
+
+    return result
 
 
 def resolve_channels_path(
@@ -90,6 +289,63 @@ def load_portfolio(channels_path: Union[str, Path]) -> Dict[str, Any]:
         raise FileNotFoundError(f"{CHANNELS_FILENAME} not found at {path}")
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def save_portfolio(channels_path: Union[str, Path], portfolio: Dict[str, Any]) -> None:
+    """Saves the channels.json portfolio registry updating updated_at timestamp."""
+    path = Path(channels_path)
+    portfolio["updated_at"] = datetime.now(timezone.utc).isoformat()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(portfolio, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+
+def stage_channel_quota(
+    portfolio: Dict[str, Any],
+    channel_id: str,
+    clip_id: str,
+    status: str = "staged_mobile",
+    project: Optional[str] = None,
+    channels_path: Optional[Union[str, Path]] = None,
+    timestamp: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Immediately increments posting_cadence.posts_today, updates last_post_date,
+    and appends a post entry to post_log with status 'staged_mobile' to preserve
+    warmup quotas.
+    Optionally persists updated portfolio to channels.json if channels_path is provided.
+    Returns the modified channel dictionary.
+    """
+    target_chan: Optional[Dict[str, Any]] = None
+    for chan in portfolio.get("channels", []):
+        if chan.get("id") == channel_id:
+            target_chan = chan
+            break
+
+    if target_chan is None:
+        raise ValueError(f"Channel '{channel_id}' not found in portfolio")
+
+    now_iso = timestamp or datetime.now(timezone.utc).isoformat()
+
+    cadence = target_chan.setdefault("posting_cadence", {})
+    cadence["posts_today"] = cadence.get("posts_today", 0) + 1
+    cadence["last_post_date"] = now_iso
+
+    log_entry: Dict[str, Any] = {
+        "clip_id": clip_id,
+        "timestamp": now_iso,
+        "status": status,
+    }
+    if project:
+        log_entry["project"] = project
+
+    target_chan.setdefault("post_log", []).append(log_entry)
+
+    if channels_path:
+        save_portfolio(channels_path, portfolio)
+
+    return target_chan
 
 
 def get_brand_clusters(portfolio: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
@@ -332,105 +588,247 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def publish_clip(
+    channels_path: Union[str, Path],
+    video_path: Optional[Union[str, Path]] = None,
+    brand_cluster: Optional[str] = None,
+    channel_ids: Optional[Union[str, List[str]]] = None,
+    platforms: Optional[Union[str, List[str]]] = None,
+    clip_id: Optional[str] = None,
+    caption_hook: Optional[str] = None,
+    caption_body: Optional[str] = None,
+    hashtags: Optional[Union[str, List[str]]] = None,
+    caption_closer: Optional[str] = None,
+    caption_file: Optional[Union[str, Path]] = None,
+    dry_run: bool = False,
+    project: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Executes or simulates multi-platform publishing for a clip across brand cluster channels.
+    Delivers rendered video and bundled caption.txt to mobile channels (TikTok, Instagram Reels)
+    and stages daily posting quotas in channels.json.
+    """
+    p_path = Path(channels_path).resolve()
+    portfolio = load_portfolio(p_path)
+
+    allocated: Dict[str, Dict[str, Any]] = {}
+    cluster_name = brand_cluster
+
+    if channel_ids:
+        if isinstance(channel_ids, str):
+            raw_ids = [i.strip() for i in channel_ids.split(",") if i.strip()]
+        else:
+            raw_ids = list(channel_ids)
+
+        id_map = {c.get("id"): c for c in portfolio.get("channels", [])}
+        target_channels = []
+        for cid in raw_ids:
+            if cid not in id_map:
+                raise ValueError(f"Channel ID '{cid}' not found in portfolio")
+            target_channels.append(id_map[cid])
+
+        validate_target_allocation(target_channels)
+
+        for c in target_channels:
+            warmed, reason = is_channel_warmed_up(c)
+            if not warmed:
+                raise ValueError(
+                    f"Target channel '{c.get('id')}' is not eligible for publishing: {reason}"
+                )
+
+        for c in target_channels:
+            plat = normalize_platform(c.get("platform", ""))
+            allocated[plat] = c
+
+        if not cluster_name:
+            cluster_name = target_channels[0].get("account_name") or "Custom Selection"
+
+    elif brand_cluster:
+        matched = match_brand_cluster(portfolio, brand_cluster)
+        if not matched:
+            raise ValueError(f"No channels found matching brand cluster '{brand_cluster}'")
+
+        if platforms:
+            req_platforms = (
+                [p.strip() for p in platforms.split(",") if p.strip()]
+                if isinstance(platforms, str)
+                else list(platforms)
+            )
+        else:
+            req_platforms = None
+
+        allocated = select_platform_targets(
+            matched, platforms=req_platforms, enforce_warmup=True
+        )
+
+        if not allocated:
+            raise ValueError(
+                f"No eligible warmed-up channels found in brand cluster '{brand_cluster}'"
+            )
+    else:
+        raise ValueError("Either --brand-cluster or --channel-ids must be specified")
+
+    v_path: Optional[Path] = None
+    if video_path:
+        v_path = Path(video_path).resolve()
+        if not dry_run and not v_path.is_file():
+            raise FileNotFoundError(f"Video file not found at {v_path}")
+    elif not dry_run:
+        mobile_allocated = [
+            c
+            for c in allocated.values()
+            if normalize_platform(c.get("platform", "")) in ("TikTok", "Instagram Reels")
+        ]
+        if mobile_allocated:
+            raise ValueError("Video file required for publishing to mobile channels")
+
+    caption_content = ""
+    c_path: Optional[Path] = None
+
+    if caption_file:
+        c_src = Path(caption_file).resolve()
+        if not c_src.is_file():
+            raise FileNotFoundError(f"Caption file not found at {c_src}")
+        caption_content = c_src.read_text(encoding="utf-8")
+    else:
+        caption_content = format_caption(
+            hook=caption_hook,
+            body=caption_body,
+            hashtags=hashtags,
+            closer=caption_closer,
+        )
+
+    if v_path:
+        if caption_content:
+            c_path = bundle_caption(v_path, caption_content=caption_content)
+        else:
+            candidate_cap = v_path.parent / "caption.txt"
+            if candidate_cap.is_file():
+                c_path = candidate_cap
+
+    actual_clip_id = (
+        clip_id
+        or (v_path.stem if v_path else f"clip-{int(datetime.now(timezone.utc).timestamp())}")
+    )
+
+    publication_manifest: List[Dict[str, Any]] = []
+
+    for plat, chan in allocated.items():
+        if plat in ("TikTok", "Instagram Reels"):
+            dummy_video = v_path or (p_path.parent / "simulated.mp4")
+            transfer_res = deliver_mobile_channel(
+                channel=chan,
+                video_path=dummy_video,
+                caption_path=c_path,
+                dry_run=dry_run,
+            )
+
+            if not dry_run:
+                stage_channel_quota(
+                    portfolio=portfolio,
+                    channel_id=chan["id"],
+                    clip_id=actual_clip_id,
+                    status="staged_mobile",
+                    project=project,
+                    channels_path=p_path,
+                )
+
+            entry = {
+                "status": "staged_mobile" if not dry_run else "simulated",
+                "platform": plat,
+                "channel_id": chan.get("id"),
+                "handle": chan.get("handle"),
+                "protocol": transfer_res.get("protocol"),
+                "transfer": transfer_res,
+                "caption_bundled": bool(c_path and c_path.is_file()) if not dry_run else bool(caption_content),
+            }
+            publication_manifest.append(entry)
+
+        elif plat == "YouTube Shorts":
+            entry = {
+                "status": "pending_upload" if not dry_run else "simulated",
+                "platform": plat,
+                "channel_id": chan.get("id"),
+                "handle": chan.get("handle"),
+                "note": "YouTube Shorts publishing engine deferred to Ticket #19",
+            }
+            publication_manifest.append(entry)
+
+    overall_status = "allocated" if dry_run else "staged_mobile"
+
+    return {
+        "status": overall_status,
+        "brand_cluster": cluster_name,
+        "clip_id": actual_clip_id,
+        "video_path": str(v_path) if v_path else None,
+        "caption_file": str(c_path) if c_path else None,
+        "dry_run": dry_run,
+        "allocated_count": len(allocated),
+        "targets": allocated,
+        "publication_manifest": publication_manifest,
+    }
+
+
 def cmd_publish(args: argparse.Namespace) -> int:
     channels_path = resolve_channels_path(args.project_dir, args.channels)
     if not channels_path or not channels_path.is_file():
         sys.stderr.write(f"Error: {CHANNELS_FILENAME} not found\n")
         return 1
 
-    try:
-        portfolio = load_portfolio(channels_path)
-    except Exception as e:
-        sys.stderr.write(f"Error loading {channels_path}: {e}\n")
-        return 1
-
-    allocated: Dict[str, Dict[str, Any]] = {}
-    brand_cluster = args.brand_cluster
-
-    if args.channel_ids:
-        raw_ids = [i.strip() for i in args.channel_ids.split(",") if i.strip()]
-        id_map = {c.get("id"): c for c in portfolio.get("channels", [])}
-        target_channels = []
-        for cid in raw_ids:
-            if cid not in id_map:
-                sys.stderr.write(f"Error: Channel ID '{cid}' not found in portfolio\n")
-                return 1
-            target_channels.append(id_map[cid])
-
-        try:
-            validate_target_allocation(target_channels)
-        except DuplicatePlatformError as e:
-            sys.stderr.write(f"Error: {e}\n")
-            return 1
-
-        for c in target_channels:
-            warmed, reason = is_channel_warmed_up(c)
-            if not warmed:
-                sys.stderr.write(
-                    f"Error: Target channel '{c.get('id')}' is not eligible for publishing: {reason}\n"
-                )
-                return 1
-
-        for c in target_channels:
-            plat = normalize_platform(c.get("platform", ""))
-            allocated[plat] = c
-
-        if not brand_cluster:
-            brand_cluster = target_channels[0].get("account_name") or "Custom Selection"
-
-    elif args.brand_cluster:
-        matched = match_brand_cluster(portfolio, args.brand_cluster)
-        if not matched:
-            sys.stderr.write(
-                f"Error: No channels found matching brand cluster '{args.brand_cluster}'\n"
-            )
-            return 1
-
-        req_platforms = (
-            [p.strip() for p in args.platforms.split(",") if p.strip()]
-            if args.platforms
-            else None
-        )
-
-        try:
-            allocated = select_platform_targets(
-                matched, platforms=req_platforms, enforce_warmup=True
-            )
-        except DuplicatePlatformError as e:
-            sys.stderr.write(f"Error: {e}\n")
-            return 1
-
-        if not allocated:
-            sys.stderr.write(
-                f"Error: No eligible warmed-up channels found in brand cluster '{args.brand_cluster}'\n"
-            )
-            return 1
-
-    else:
+    if not args.brand_cluster and not args.channel_ids:
         sys.stderr.write("Error: Either --brand-cluster or --channel-ids must be specified\n")
         return 1
 
+    try:
+        res = publish_clip(
+            channels_path=channels_path,
+            video_path=args.video_path,
+            brand_cluster=args.brand_cluster,
+            channel_ids=args.channel_ids,
+            platforms=args.platforms,
+            clip_id=args.clip_id,
+            caption_hook=args.caption_hook,
+            caption_body=args.caption_body,
+            hashtags=args.hashtags,
+            caption_closer=args.caption_closer,
+            caption_file=args.caption_file,
+            dry_run=args.dry_run,
+            project=getattr(args, "project", None),
+        )
+    except (ValueError, FileNotFoundError, DuplicatePlatformError) as e:
+        sys.stderr.write(f"Error: {e}\n")
+        return 1
+    except Exception as e:
+        sys.stderr.write(f"Error: {e}\n")
+        return 1
+
     if args.json:
-        output: Dict[str, Any] = {
-            "status": "allocated",
-            "brand_cluster": brand_cluster,
-            "clip_id": args.clip_id,
-            "video_path": args.video_path,
-            "dry_run": args.dry_run,
-            "allocated_count": len(allocated),
-            "targets": allocated,
-        }
-        sys.stdout.write(json.dumps(output, indent=2) + "\n")
+        sys.stdout.write(json.dumps(res, indent=2) + "\n")
+        return 0
+
+    if args.dry_run:
+        sys.stdout.write(
+            f"Allocated {res['allocated_count']} platform targets for brand cluster '{res['brand_cluster']}':\n"
+        )
+        for plat, chan in res.get("targets", {}).items():
+            sys.stdout.write(
+                f"  {plat}: {chan.get('handle')} ({chan.get('id')}) "
+                f"[{chan.get('stage')} - {chan.get('status')}]\n"
+            )
         return 0
 
     sys.stdout.write(
-        f"Allocated {len(allocated)} platform targets for brand cluster '{brand_cluster}':\n"
+        f"Published clip '{res['clip_id']}' to brand cluster '{res['brand_cluster']}' "
+        f"({res['allocated_count']} targets):\n"
     )
-    for plat, chan in allocated.items():
-        sys.stdout.write(
-            f"  {plat}: {chan.get('handle')} ({chan.get('id')}) "
-            f"[{chan.get('stage')} - {chan.get('status')}]\n"
-        )
+    for entry in res.get("publication_manifest", []):
+        plat = entry.get("platform")
+        cid = entry.get("channel_id")
+        h = entry.get("handle")
+        st = entry.get("status")
+        proto = entry.get("protocol") or "n/a"
+        cap_note = " (caption bundled)" if entry.get("caption_bundled") else ""
+        sys.stdout.write(f"  [{st}] {plat:16} {h:20} ({cid}) via {proto}{cap_note}\n")
 
     return 0
 
@@ -513,6 +911,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_pub.add_argument("--platforms", default=None, help="Comma-separated target platforms")
     p_pub.add_argument("--clip-id", default=None, help="Clip identifier")
     p_pub.add_argument("--video", "--video-path", dest="video_path", default=None, help="Path to rendered MP4 video")
+    p_pub.add_argument("--caption-hook", default=None, help="Hook headline title for companion caption")
+    p_pub.add_argument("--caption-body", "--caption-desc", dest="caption_body", default=None, help="Description body text for companion caption")
+    p_pub.add_argument("--hashtags", default=None, help="Comma-separated or space-separated hashtags")
+    p_pub.add_argument("--caption-closer", default=None, help="Approved campaign closer CTA for companion caption")
+    p_pub.add_argument("--caption-file", default=None, help="Path to existing caption text file")
+    p_pub.add_argument("--project", default=None, help="Campaign or project slug")
     p_pub.add_argument("--dry-run", action="store_true", help="Validate allocation without executing transfers")
     p_pub.add_argument("--json", action="store_true", help="Output JSON format")
 

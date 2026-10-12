@@ -612,5 +612,549 @@ class TestClippingPublisherSlice4CLI(unittest.TestCase):
         self.assertEqual(data["youtube_channels"][0]["id"], "chan-yt-01")
 
 
+class TestClippingPublisherSlice5CaptionBundling(unittest.TestCase):
+    """Slice 5: Caption formatting and companion caption.txt bundling."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="test_caption_bundling_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_format_caption_full_fields(self):
+        """Verifies format_caption combines hook, body, hashtags, and closer into standard layout."""
+        import clipping_publisher
+
+        formatted = clipping_publisher.format_caption(
+            hook="Stop making this clipping mistake!",
+            body="Here is why your retention drops at 0:03 seconds.",
+            hashtags=["#clipping", "#podcast", "#viral"],
+            closer="Follow @curiousclips for daily breakdowns.",
+        )
+        expected = (
+            "Stop making this clipping mistake!\n\n"
+            "Here is why your retention drops at 0:03 seconds.\n\n"
+            "#clipping #podcast #viral\n\n"
+            "Follow @curiousclips for daily breakdowns."
+        )
+        self.assertEqual(formatted, expected)
+
+    def test_format_caption_hashtags_as_string_and_normalizes_hash(self):
+        """Verifies format_caption accepts string hashtags and ensures hash symbols."""
+        import clipping_publisher
+
+        formatted = clipping_publisher.format_caption(
+            hook="Viral Hook",
+            body="Clip body",
+            hashtags="shorts, podcast, n3on",
+            closer="Check link in bio",
+        )
+        self.assertIn("#shorts #podcast #n3on", formatted)
+
+    def test_format_caption_omitted_optional_fields(self):
+        """Verifies format_caption handles missing hook, body, hashtags, or closer cleanly."""
+        import clipping_publisher
+
+        # Only hook and hashtags
+        formatted = clipping_publisher.format_caption(
+            hook="Hook Only",
+            hashtags=["#test"],
+        )
+        self.assertEqual(formatted, "Hook Only\n\n#test")
+
+        # Empty returns empty string
+        self.assertEqual(clipping_publisher.format_caption(), "")
+
+    def test_bundle_caption_writes_file_alongside_video(self):
+        """Verifies bundle_caption writes caption.txt in the same directory as the video file."""
+        import clipping_publisher
+
+        video_path = Path(self.tmpdir) / "output_clip.mp4"
+        video_path.write_bytes(b"dummy mp4 content")
+
+        caption_path = clipping_publisher.bundle_caption(
+            target=video_path,
+            hook="Test Hook",
+            body="Test Body",
+            hashtags=["#test"],
+            closer="Test Closer",
+        )
+
+        expected_caption_file = Path(self.tmpdir) / "caption.txt"
+        self.assertEqual(caption_path.resolve(), expected_caption_file.resolve())
+        self.assertTrue(expected_caption_file.is_file())
+
+        content = expected_caption_file.read_text(encoding="utf-8")
+        self.assertIn("Test Hook", content)
+        self.assertIn("Test Body", content)
+        self.assertIn("#test", content)
+        self.assertIn("Test Closer", content)
+
+    def test_bundle_caption_writes_to_explicit_directory(self):
+        """Verifies bundle_caption writes caption.txt into an explicit directory."""
+        import clipping_publisher
+
+        target_dir = Path(self.tmpdir) / "staged"
+        caption_path = clipping_publisher.bundle_caption(
+            target=target_dir,
+            caption_content="Custom pre-formatted caption string",
+        )
+
+        self.assertEqual(caption_path, target_dir / "caption.txt")
+        self.assertTrue(caption_path.is_file())
+        self.assertEqual(caption_path.read_text(encoding="utf-8"), "Custom pre-formatted caption string")
+
+
+class TestClippingPublisherSlice6MobileTransfer(unittest.TestCase):
+    """Slice 6: Mobile device delivery protocols (cloud_folder, adb_push, local_qr, webhook)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="test_mobile_transfer_")
+        self.video_file = Path(self.tmpdir) / "render_clip_01.mp4"
+        self.video_file.write_bytes(b"\x00\x00\x00\x1cftypisom")
+        self.caption_file = Path(self.tmpdir) / "caption.txt"
+        self.caption_file.write_text("Hook: Watch this!\n\n#clipping", encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_deliver_cloud_folder_copies_video_and_caption(self):
+        """Verifies cloud_folder copies both the rendered MP4 and companion caption.txt to destination."""
+        import clipping_publisher
+
+        cloud_dest = Path(self.tmpdir) / "CloudStorage"
+        channel = {
+            "id": "chan-tt-01",
+            "platform": "TikTok",
+            "device_transfer": {
+                "protocol": "cloud_folder",
+                "target": str(cloud_dest),
+                "enabled": True,
+            },
+        }
+
+        res = clipping_publisher.deliver_mobile_channel(
+            channel=channel,
+            video_path=self.video_file,
+            caption_path=self.caption_file,
+            dry_run=False,
+        )
+
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["protocol"], "cloud_folder")
+        self.assertTrue((cloud_dest / self.video_file.name).is_file())
+        self.assertTrue((cloud_dest / "caption.txt").is_file())
+        self.assertEqual(
+            (cloud_dest / "caption.txt").read_text(encoding="utf-8"),
+            "Hook: Watch this!\n\n#clipping",
+        )
+
+    def test_deliver_cloud_folder_dry_run_does_not_copy_files(self):
+        """Verifies cloud_folder in dry_run mode does not perform filesystem copies."""
+        import clipping_publisher
+
+        cloud_dest = Path(self.tmpdir) / "CloudDryRun"
+        channel = {
+            "id": "chan-tt-01",
+            "platform": "TikTok",
+            "device_transfer": {
+                "protocol": "cloud_folder",
+                "target": str(cloud_dest),
+                "enabled": True,
+            },
+        }
+
+        res = clipping_publisher.deliver_mobile_channel(
+            channel=channel,
+            video_path=self.video_file,
+            caption_path=self.caption_file,
+            dry_run=True,
+        )
+
+        self.assertEqual(res["status"], "simulated")
+        self.assertFalse(cloud_dest.exists())
+
+    def test_deliver_adb_push_executes_transfer(self):
+        """Verifies adb_push stages or executes push of video and caption to target path."""
+        import clipping_publisher
+
+        channel = {
+            "id": "chan-ig-01",
+            "platform": "Instagram Reels",
+            "device_transfer": {
+                "protocol": "adb_push",
+                "target": "/sdcard/DCIM/Camera/",
+                "enabled": True,
+            },
+        }
+
+        res = clipping_publisher.deliver_mobile_channel(
+            channel=channel,
+            video_path=self.video_file,
+            caption_path=self.caption_file,
+            dry_run=False,
+        )
+
+        self.assertIn(res["status"], ("success", "simulated"))
+        self.assertEqual(res["protocol"], "adb_push")
+        self.assertEqual(res["adb_target"], "/sdcard/DCIM/Camera/")
+        self.assertEqual(res["video_path"], str(self.video_file))
+        self.assertEqual(res["caption_path"], str(self.caption_file))
+
+    def test_deliver_local_qr_protocol(self):
+        """Verifies local_qr produces local server download URLs for video and caption."""
+        import clipping_publisher
+
+        channel = {
+            "id": "chan-tt-qr",
+            "platform": "TikTok",
+            "device_transfer": {
+                "protocol": "local_qr",
+                "target": "http://192.168.1.50:8080",
+                "enabled": True,
+            },
+        }
+
+        res = clipping_publisher.deliver_mobile_channel(
+            channel=channel,
+            video_path=self.video_file,
+            caption_path=self.caption_file,
+            dry_run=False,
+        )
+
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["protocol"], "local_qr")
+        self.assertIn("192.168.1.50:8080", res["server_url"])
+        self.assertIn("caption", res["caption_url"])
+
+    def test_deliver_webhook_protocol(self):
+        """Verifies webhook protocol prepares dispatch payload with video and caption."""
+        import clipping_publisher
+
+        channel = {
+            "id": "chan-ig-hook",
+            "platform": "Instagram Reels",
+            "device_transfer": {
+                "protocol": "webhook",
+                "target": "https://api.telegram.org/bot123/sendVideo",
+                "enabled": True,
+            },
+        }
+
+        res = clipping_publisher.deliver_mobile_channel(
+            channel=channel,
+            video_path=self.video_file,
+            caption_path=self.caption_file,
+            dry_run=False,
+        )
+
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["protocol"], "webhook")
+        self.assertEqual(res["webhook_url"], "https://api.telegram.org/bot123/sendVideo")
+
+    def test_deliver_disabled_channel_raises_error(self):
+        """Verifies deliver_mobile_channel raises ValueError if device transfer is disabled."""
+        import clipping_publisher
+
+        channel = {
+            "id": "chan-tt-disabled",
+            "platform": "TikTok",
+            "device_transfer": {
+                "protocol": "cloud_folder",
+                "target": "/tmp",
+                "enabled": False,
+            },
+        }
+
+        with self.assertRaises(ValueError) as ctx:
+            clipping_publisher.deliver_mobile_channel(
+                channel=channel,
+                video_path=self.video_file,
+                caption_path=self.caption_file,
+            )
+        self.assertIn("disabled", str(ctx.exception).lower())
+
+
+class TestClippingPublisherSlice7QuotaStaging(unittest.TestCase):
+    """Slice 7: Quota staging in channels.json portfolio registry."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="test_quota_staging_")
+        self.channels_path = Path(self.tmpdir) / "channels.json"
+        self.portfolio_data = {
+            "version": "1.0.0",
+            "workspace_id": "quota-test",
+            "channels": [
+                {
+                    "id": "chan-tt-01",
+                    "platform": "TikTok",
+                    "handle": "@test_tt",
+                    "stage": "Seeding",
+                    "status": "active",
+                    "posting_cadence": {
+                        "daily_post_limit": 1,
+                        "posts_today": 0,
+                    },
+                    "post_log": [],
+                },
+                {
+                    "id": "chan-ig-01",
+                    "platform": "Instagram Reels",
+                    "handle": "@test_ig",
+                    "stage": "Ramp-Up",
+                    "status": "active",
+                    "posting_cadence": {
+                        "daily_post_limit": 3,
+                        "posts_today": 1,
+                    },
+                    "post_log": [],
+                },
+            ],
+        }
+        self.channels_path.write_text(json.dumps(self.portfolio_data, indent=2), encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_stage_channel_quota_increments_and_appends_log(self):
+        """Verifies stage_channel_quota increments posts_today, sets last_post_date, and logs staged_mobile."""
+        import clipping_publisher
+
+        portfolio = clipping_publisher.load_portfolio(self.channels_path)
+        chan = clipping_publisher.stage_channel_quota(
+            portfolio=portfolio,
+            channel_id="chan-tt-01",
+            clip_id="clip-test-101",
+            project="test-campaign",
+            channels_path=self.channels_path,
+        )
+
+        self.assertEqual(chan["posting_cadence"]["posts_today"], 1)
+        self.assertTrue(chan["posting_cadence"]["last_post_date"])
+        self.assertEqual(len(chan["post_log"]), 1)
+        log_entry = chan["post_log"][0]
+        self.assertEqual(log_entry["clip_id"], "clip-test-101")
+        self.assertEqual(log_entry["status"], "staged_mobile")
+        self.assertEqual(log_entry["project"], "test-campaign")
+
+        # Verify persistence on disk
+        reloaded = clipping_publisher.load_portfolio(self.channels_path)
+        reloaded_chan = next(c for c in reloaded["channels"] if c["id"] == "chan-tt-01")
+        self.assertEqual(reloaded_chan["posting_cadence"]["posts_today"], 1)
+        self.assertEqual(reloaded_chan["post_log"][0]["status"], "staged_mobile")
+
+    def test_quota_staging_blocks_subsequent_channel_eligibility(self):
+        """Verifies channel with limit 1 is immediately blocked by is_channel_warmed_up after staging."""
+        import clipping_publisher
+
+        portfolio = clipping_publisher.load_portfolio(self.channels_path)
+        chan = next(c for c in portfolio["channels"] if c["id"] == "chan-tt-01")
+
+        # Initially eligible
+        eligible, _ = clipping_publisher.is_channel_warmed_up(chan)
+        self.assertTrue(eligible)
+
+        # Stage quota
+        clipping_publisher.stage_channel_quota(
+            portfolio=portfolio,
+            channel_id="chan-tt-01",
+            clip_id="clip-test-102",
+        )
+
+        # Now limit reached (1/1) -> blocked
+        eligible_after, reason = clipping_publisher.is_channel_warmed_up(chan)
+        self.assertFalse(eligible_after)
+        self.assertIn("Daily post limit reached", reason)
+
+    def test_stage_nonexistent_channel_raises_value_error(self):
+        """Verifies stage_channel_quota raises ValueError when channel ID is not found."""
+        import clipping_publisher
+
+        portfolio = clipping_publisher.load_portfolio(self.channels_path)
+        with self.assertRaises(ValueError) as ctx:
+            clipping_publisher.stage_channel_quota(
+                portfolio=portfolio,
+                channel_id="non-existent-channel",
+                clip_id="clip-001",
+            )
+        self.assertIn("non-existent-channel", str(ctx.exception))
+
+
+class TestClippingPublisherSlice8PublishIntegration(unittest.TestCase):
+    """Slice 8: End-to-end publish command integration with mobile delivery & quota staging."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="test_pub_int_")
+        self.channels_path = Path(self.tmpdir) / "channels.json"
+        self.cloud_folder = Path(self.tmpdir) / "CloudStorage"
+
+        self.video_file = Path(self.tmpdir) / "test_clip.mp4"
+        self.video_file.write_bytes(b"\x00\x00\x00\x1cftypmp42")
+
+        self.portfolio_data = {
+            "version": "1.0.0",
+            "workspace_id": "int-test-workspace",
+            "channels": [
+                {
+                    "id": "chan-tt-01",
+                    "platform": "TikTok",
+                    "handle": "@int_tt",
+                    "account_name": "Int Brand",
+                    "stage": "Seeding",
+                    "status": "active",
+                    "posting_cadence": {
+                        "daily_post_limit": 1,
+                        "posts_today": 0,
+                    },
+                    "device_transfer": {
+                        "protocol": "cloud_folder",
+                        "target": str(self.cloud_folder),
+                        "enabled": True,
+                    },
+                    "post_log": [],
+                },
+                {
+                    "id": "chan-ig-01",
+                    "platform": "Instagram Reels",
+                    "handle": "@int_ig",
+                    "account_name": "Int Brand",
+                    "stage": "Ramp-Up",
+                    "status": "active",
+                    "posting_cadence": {
+                        "daily_post_limit": 3,
+                        "posts_today": 0,
+                    },
+                    "device_transfer": {
+                        "protocol": "local_qr",
+                        "target": "http://127.0.0.1:8080",
+                        "enabled": True,
+                    },
+                    "post_log": [],
+                },
+            ],
+        }
+        self.channels_path.write_text(json.dumps(self.portfolio_data, indent=2), encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def run_cli(self, args: List[str]) -> subprocess.CompletedProcess:
+        cmd = [sys.executable, str(SCRIPT_PATH)] + args
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+    def test_publish_executes_mobile_transfer_and_quota_staging(self):
+        """Verifies publish subcommand delivers files to mobile target and stages quota in channels.json."""
+        res = self.run_cli([
+            "publish",
+            "--brand-cluster", "Int Brand",
+            "--channels", str(self.channels_path),
+            "--video", str(self.video_file),
+            "--clip-id", "clip-int-999",
+            "--caption-hook", "Mindblowing Truth!",
+            "--caption-body", "You won't believe what happened in this episode.",
+            "--hashtags", "mindblown, podcast, clips",
+            "--caption-closer", "Follow for more daily clips!",
+            "--json",
+        ])
+        self.assertEqual(res.returncode, 0, f"publish failed: {res.stderr}")
+        data = json.loads(res.stdout)
+        self.assertEqual(data.get("status"), "staged_mobile")
+        self.assertEqual(data.get("clip_id"), "clip-int-999")
+
+        # Verify cloud_folder received video and caption
+        self.assertTrue((self.cloud_folder / "test_clip.mp4").is_file())
+        caption_dest = self.cloud_folder / "caption.txt"
+        self.assertTrue(caption_dest.is_file())
+        caption_text = caption_dest.read_text(encoding="utf-8")
+        self.assertIn("Mindblowing Truth!", caption_text)
+        self.assertIn("#mindblown #podcast #clips", caption_text)
+        self.assertIn("Follow for more daily clips!", caption_text)
+
+        # Verify channels.json on disk has incremented posts_today and staged_mobile log
+        portfolio = json.loads(self.channels_path.read_text(encoding="utf-8"))
+        tt_chan = next(c for c in portfolio["channels"] if c["id"] == "chan-tt-01")
+        self.assertEqual(tt_chan["posting_cadence"]["posts_today"], 1)
+        self.assertEqual(len(tt_chan["post_log"]), 1)
+        self.assertEqual(tt_chan["post_log"][0]["clip_id"], "clip-int-999")
+        self.assertEqual(tt_chan["post_log"][0]["status"], "staged_mobile")
+
+        ig_chan = next(c for c in portfolio["channels"] if c["id"] == "chan-ig-01")
+        self.assertEqual(ig_chan["posting_cadence"]["posts_today"], 1)
+        self.assertEqual(ig_chan["post_log"][0]["status"], "staged_mobile")
+
+    def test_publish_dry_run_leaves_channels_json_untouched(self):
+        """Verifies publish with --dry-run does not modify posts_today or create cloud files."""
+        res = self.run_cli([
+            "publish",
+            "--brand-cluster", "Int Brand",
+            "--channels", str(self.channels_path),
+            "--video", str(self.video_file),
+            "--clip-id", "clip-dry-1",
+            "--dry-run",
+            "--json",
+        ])
+        self.assertEqual(res.returncode, 0)
+        data = json.loads(res.stdout)
+        self.assertEqual(data.get("status"), "allocated")
+
+        # Destination folder should not exist
+        self.assertFalse(self.cloud_folder.exists())
+
+        # channels.json should have 0 posts_today
+        portfolio = json.loads(self.channels_path.read_text(encoding="utf-8"))
+        tt_chan = next(c for c in portfolio["channels"] if c["id"] == "chan-tt-01")
+        self.assertEqual(tt_chan["posting_cadence"]["posts_today"], 0)
+        self.assertEqual(len(tt_chan["post_log"]), 0)
+
+    def test_publish_with_caption_file(self):
+        """Verifies publish accepts --caption-file and delivers its content."""
+        custom_cap = Path(self.tmpdir) / "source_caption.txt"
+        custom_cap.write_text("Custom Preformatted Caption #custom", encoding="utf-8")
+
+        res = self.run_cli([
+            "publish",
+            "--brand-cluster", "Int Brand",
+            "--channels", str(self.channels_path),
+            "--video", str(self.video_file),
+            "--caption-file", str(custom_cap),
+            "--json",
+        ])
+        self.assertEqual(res.returncode, 0)
+        self.assertTrue((self.cloud_folder / "caption.txt").is_file())
+        self.assertEqual(
+            (self.cloud_folder / "caption.txt").read_text(encoding="utf-8"),
+            "Custom Preformatted Caption #custom",
+        )
+
+    def test_publish_missing_video_error_when_executing(self):
+        """Verifies publish without --video fails with clear error when not in dry_run."""
+        res = self.run_cli([
+            "publish",
+            "--brand-cluster", "Int Brand",
+            "--channels", str(self.channels_path),
+        ])
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("video", res.stderr.lower())
+
+    def test_publish_clip_programmatic_api(self):
+        """Verifies publish_clip function can be invoked programmatically."""
+        import clipping_publisher
+
+        res = clipping_publisher.publish_clip(
+            channels_path=self.channels_path,
+            video_path=self.video_file,
+            brand_cluster="Int Brand",
+            caption_hook="API Hook",
+            caption_body="API Body",
+            hashtags=["#api"],
+            caption_closer="API Closer",
+            dry_run=False,
+        )
+
+        self.assertEqual(res["status"], "staged_mobile")
+        self.assertEqual(len(res["publication_manifest"]), 2)
+        self.assertTrue(Path(res["caption_file"]).is_file())
+
+
 if __name__ == "__main__":
     unittest.main()
