@@ -1,17 +1,17 @@
 ---
 name: clipping-pipeline
-description: Orchestrate short-form clipping pipeline and execution workflow across 7 gated stages with pre-flight transition checks.
+description: Orchestrate short-form clipping pipeline and execution workflow across 8 gated stages with pre-flight transition checks.
 ---
 
 # Master Pipeline Router (clipping-pipeline)
 
-Master router and orchestrator for the 7-step short-form video clipping pipeline. Inspects campaign state, validates pre-flight transition gates, prevents premature execution across unapproved stages, isolates configuration load, and manages dispatch across all editing phases. Bridges workspace-level channel portfolio and warmup lifecycles (`channels.json`) into Step 7 packaging and automated mobile device delivery.
+Master router and orchestrator for the 8-step short-form video clipping pipeline. Inspects campaign state, validates pre-flight transition gates, prevents premature execution across unapproved stages, isolates configuration load, and manages dispatch across all editing and publishing phases. Bridges workspace-level channel portfolio and warmup lifecycles (`channels.json`) into Step 8 publishing and automated mobile device delivery.
 
-For campaign rules and data contracts, see [`references/CAMPAIGN_BRIEF_SCHEMA.md`](../../references/CAMPAIGN_BRIEF_SCHEMA.md). For channel portfolio schema, see [`references/CHANNEL_PORTFOLIO_SCHEMA.md`](../../references/CHANNEL_PORTFOLIO_SCHEMA.md). For architectural decisions, see [`docs/adr/0007-workspace-level-channel-portfolio-registry.md`](../../docs/adr/0007-workspace-level-channel-portfolio-registry.md), [`docs/adr/0008-health-gated-warmup-advancement.md`](../../docs/adr/0008-health-gated-warmup-advancement.md), and [`docs/adr/0009-automated-device-delivery.md`](../../docs/adr/0009-automated-device-delivery.md). For step-isolated execution parameters, query `scripts/clipping_state.py get-step-config`.
+For campaign rules and data contracts, see [`references/CAMPAIGN_BRIEF_SCHEMA.md`](../../references/CAMPAIGN_BRIEF_SCHEMA.md). For channel portfolio schema, see [`references/CHANNEL_PORTFOLIO_SCHEMA.md`](../../references/CHANNEL_PORTFOLIO_SCHEMA.md). For architectural decisions, see [`docs/adr/0007-workspace-level-channel-portfolio-registry.md`](../../docs/adr/0007-workspace-level-channel-portfolio-registry.md), [`docs/adr/0008-health-gated-warmup-advancement.md`](../../docs/adr/0008-health-gated-warmup-advancement.md), [`docs/adr/0009-automated-device-delivery.md`](../../docs/adr/0009-automated-device-delivery.md), and [`docs/adr/0010-dedicated-pipeline-publishing-step.md`](../../docs/adr/0010-dedicated-pipeline-publishing-step.md). For step-isolated execution parameters, query `scripts/clipping_state.py get-step-config`.
 
 ---
 
-## Standardized 7-Step Sequence
+## Standardized 8-Step Sequence
 
 The clipping pipeline executes strictly in this sequential order:
 
@@ -21,7 +21,8 @@ The clipping pipeline executes strictly in this sequential order:
 4. `clipping-assembly`: Build 9:16 vertical canvas (1080×1920), anchor speaker positions, and prune dead air $>0.4$s with consonant buffer.
 5. `clipping-captions`: Generate kinetic captions in mic/chest safe zone, applying keyword emphasis.
 6. `clipping-vfx-sfx`: Composite mandatory persistent watermark, title hook graphic, and subtle audio transient accents.
-7. `clipping-qc-packager`: Audit loudness against -14 LUFS, verify rotated approved caption closers, bridge with workspace channel portfolio (`channels.json`) to filter `eligible_channels` (matching platform, `health_status != 'cooldown'`, and `posts_today < daily_post_cap`), flag channels in cooldown or at daily capacity as ineligible with specific reasons, inject automated device transfer configurations (`device_transfer`), and format for 30-minute Whop submission window.
+7. `clipping-qc-packager`: Audit loudness against -14 LUFS, verify rotated approved caption closers, ensure duration bounds, and format for 30-minute Whop submission window (pure QC decoupled from channel distribution per ADR 0010).
+8. `clipping-publisher`: Match Brand Clusters (`account_name`), enforce zero same-platform duplication, enforce warmup gating, deliver mobile packages with companion `caption.txt`, upload YouTube Shorts via Data API v3 with BrowserOS Neo fallback, stage daily posting quotas in `channels.json`, and record structured `publication_manifest` in `.clipping_state.json`.
 
 ---
 
@@ -62,7 +63,7 @@ Before any editing or downstream analysis can proceed, campaign guidelines must 
 - If `.clipping_state.json` was just initialized or `guidelines_approved` is `false`:
   - Hand off immediately to `clipping-guidelines`.
   - Ingest the raw campaign brief, generate `campaign_brief.json`, and present `campaign_brief_review.md` with `RequestFeedback: true`.
-  - Halt all downstream steps (`clipping-transcription` through `clipping-qc-packager`).
+  - Halt all downstream steps (`clipping-transcription` through `clipping-publisher`).
   - Do not proceed until human approval is confirmed via:
     ```bash
     python3 scripts/clipping_state.py approve --step clipping-guidelines --dir <project-dir>
@@ -83,7 +84,7 @@ Each stage requires its immediate predecessor to be completed and approved in `.
 - **Exit Code `2`**: Pre-flight gate blocked. Prerequisite step incomplete or unapproved. Execution must stop immediately. Premature transitions are prohibited.
 - **Bypass Flag (`--force`)**: In editorial override scenarios, `--force` bypasses the gate with a logged warning. Use only when explicitly commanded by the user.
 
-### 4. Context-Isolated Configuration Extraction & Channel Portfolio Bridge
+### 4. Context-Isolated Configuration Extraction
 
 To prevent context window saturation and retain razor-sharp attention, do NOT pass entire brief files or full manifest documents into subagents.
 
@@ -94,29 +95,29 @@ python3 scripts/clipping_state.py get-step-config --step <target-step> --dir <pr
 
 Consult [`references/CAMPAIGN_BRIEF_SCHEMA.md`](../../references/CAMPAIGN_BRIEF_SCHEMA.md) for full schema definitions and allowable parameters. Provide the resulting JSON payload directly to the executing step subagent.
 
-#### Step 7 Channel Portfolio Bridge & Device Delivery
-When retrieving configuration for Step 7 (`clipping-qc-packager`), the state engine dynamically queries `channels.json` (per ADR 0007, ADR 0008, ADR 0009):
-- **`eligible_channels`**: Accounts filtered to match campaign target platforms, verifying `health_status != 'cooldown'` (and not in `Account Cooldown` stage or suppression), and verifying remaining daily capacity (`posts_today < daily_post_cap` / `daily_post_limit`).
-- **`ineligible_channels`**: Accounts currently in cooldown or at daily post limits are flagged as ineligible with explicit reasons (e.g. suppression cooldown, daily capacity reached, platform mismatch).
-- **`device_transfer`**: Automated mobile device transfer configurations (`qr_code`, `adb_push`, `telegram_dispatch`, `cloud_sync`) from `channels.json` are passed into the Step 7 slice to eliminate friction for mobile-enforced platforms (`api_upload_allowed: false`).
+- **Step 7 (`clipping-qc-packager`)**: Focuses purely on EBU R128 loudness verification (-14 LUFS), duration bounds, caption closers, and Whop compliance packaging (decoupled from channel distribution per ADR 0010).
+- **Step 8 (`clipping-publisher`)**: Queries workspace channel portfolio (`channels.json`) to select `eligible_channels` across brand clusters, strictly verifying `health_status != 'cooldown'` (excluding accounts in `Account Cooldown`), enforcing daily post capacity (`posts_today < daily_post_cap` / `daily_post_limit`), executing automated mobile `device_transfer` delivery with companion `caption.txt`, uploading YouTube Shorts via Data API v3 with BrowserOS Neo fallback, and persisting `publication_manifest`.
 
 ### 5. Step Dispatch & Advance
 
 1. Dispatch the target task to its dedicated skill or subagent with the extracted config slice.
-2. For Step 7, execute mobile device delivery using the configured protocol:
+2. For Step 8, execute multi-platform distribution:
    ```bash
-   python3 scripts/clipping_channels.py transfer --clip <path/to/clip.mp4> --channel <channel-id>
+   python3 scripts/clipping_publisher.py publish \
+     --brand-cluster "<brand-cluster>" \
+     --channels channels.json \
+     --video <path/to/clip.mp4> \
+     --clip-id "<clip-id>" \
+     --project-dir <project-dir>
    ```
-   and record the publication in the channel portfolio registry:
-   ```bash
-   python3 scripts/clipping_channels.py log-post --id <channel-id> --clip-id <clip-id> --project <project-slug>
-   ```
+   This generates and writes `publication_manifest` into `.clipping_state.json`.
 3. Upon verified completion of the step's work, record step completion in the state engine:
    ```bash
    python3 scripts/clipping_state.py approve --step <target-step> --dir <project-dir>
    ```
+   For Step 8 (`clipping-publisher`), approval validates that `publication_manifest` is present and non-empty.
 4. Query `python3 scripts/clipping_state.py status --dir <project-dir>` to confirm advancement to the next step.
-5. Repeat from Step 3 for the subsequent pipeline step until `clipping-qc-packager` is completed.
+5. Repeat from Step 3 for the subsequent pipeline step until `clipping-publisher` is completed.
 
 ---
 
@@ -126,5 +127,6 @@ The pipeline router execution is complete ONLY when:
 1. Every executed step passed its pre-flight gate check (`clipping_state.py validate --step <step>`).
 2. Campaign guidelines were approved with `guidelines_approved: true` before downstream editing commenced.
 3. Each subagent operated strictly on its isolated configuration slice (`get-step-config`).
-4. Step 7 (`clipping-qc-packager`) performed eligible channel filtering against `channels.json` and prepared automated mobile device delivery.
-5. All 7 steps (`clipping-guidelines` through `clipping-qc-packager`) reflect `status: "completed"` and `"approved": true` in `scripts/clipping_state.py status`.
+4. Step 7 (`clipping-qc-packager`) performed audio/video quality control and Whop packaging.
+5. Step 8 (`clipping-publisher`) verified brand clustering, zero same-platform duplicate allocation, executed multi-platform publishing/transfers, and persisted `publication_manifest`.
+6. All 8 steps (`clipping-guidelines` through `clipping-publisher`) reflect `status: "completed"` and `"approved": true` in `scripts/clipping_state.py status`.

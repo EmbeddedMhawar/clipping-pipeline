@@ -27,7 +27,7 @@ SKILLS_DIR = REPO_ROOT / "skills" / "clipping-pipeline"
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 REFERENCES_DIR = REPO_ROOT / "references"
 
-EXPECTED_7_STEPS = [
+EXPECTED_8_STEPS = [
     "clipping-guidelines",
     "clipping-transcription",
     "clipping-hook-hunter",
@@ -35,6 +35,7 @@ EXPECTED_7_STEPS = [
     "clipping-captions",
     "clipping-vfx-sfx",
     "clipping-qc-packager",
+    "clipping-publisher",
 ]
 
 
@@ -78,7 +79,7 @@ class TestRouterSkillFrontmatter(unittest.TestCase):
         required_triggers = [
             "clipping pipeline",
             "execution workflow",
-            "7 gated stages",
+            "8 gated stages",
             "pre-flight transition checks",
         ]
         for trigger in required_triggers:
@@ -90,15 +91,15 @@ class TestRouterSkillFrontmatter(unittest.TestCase):
 
 
 class TestRouterSkillSpecification(unittest.TestCase):
-    """Verifies skills/clipping-pipeline/SKILL.md specifies the 7-step sequence and CLI mechanics."""
+    """Verifies skills/clipping-pipeline/SKILL.md specifies the 8-step sequence and CLI mechanics."""
 
     def setUp(self):
         self.skill_file = SKILLS_DIR / "SKILL.md"
 
-    def test_skill_documents_standardized_7_step_sequence(self):
+    def test_skill_documents_standardized_8_step_sequence(self):
         content = self.skill_file.read_text(encoding="utf-8")
 
-        for step in EXPECTED_7_STEPS:
+        for step in EXPECTED_8_STEPS:
             self.assertIn(
                 step,
                 content,
@@ -107,7 +108,7 @@ class TestRouterSkillSpecification(unittest.TestCase):
 
         # Verify ordering in document: each step must appear in sequence
         last_pos = -1
-        for step in EXPECTED_7_STEPS:
+        for step in EXPECTED_8_STEPS:
             pos = content.find(step)
             self.assertGreater(
                 pos,

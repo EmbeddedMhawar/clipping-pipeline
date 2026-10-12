@@ -1678,5 +1678,193 @@ class TestClippingPublisherSlice12YouTubePortfolioLoggingAndCli(unittest.TestCas
         self.assertEqual(yt_entry.get("privacy_status"), "unlisted")
 
 
+class TestClippingPublisherSlice13PublicationManifestPersistence(unittest.TestCase):
+    """Slice 13: Publication manifest resolution and persistence into .clipping_state.json."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="test_manifest_persist_")
+        self.project_dir = Path(self.tmpdir)
+        self.channels_path = self.project_dir / "channels.json"
+        self.state_path = self.project_dir / ".clipping_state.json"
+        self.video_path = self.project_dir / "test_clip.mp4"
+        self.video_path.write_bytes(b"\x00\x00\x00\x1cftypmp42fake_mp4_bytes")
+
+        # Sample portfolio
+        self.portfolio_data = {
+            "version": "1.0.0",
+            "workspace_id": "test-persist-ws",
+            "channels": [
+                {
+                    "id": "chan-yt-persist-01",
+                    "platform": "YouTube Shorts",
+                    "handle": "@YTPersist",
+                    "account_name": "Persist Brand",
+                    "stage": "Mature",
+                    "status": "active",
+                    "posting_cadence": {
+                        "daily_post_limit": 4,
+                        "posts_today": 0,
+                    },
+                },
+                {
+                    "id": "chan-tt-persist-01",
+                    "platform": "TikTok",
+                    "handle": "@TTPersist",
+                    "account_name": "Persist Brand",
+                    "stage": "Mature",
+                    "status": "active",
+                    "posting_cadence": {
+                        "daily_post_limit": 4,
+                        "posts_today": 0,
+                    },
+                    "device_transfer": {
+                        "protocol": "cloud_folder",
+                        "target": str(self.project_dir / "cloud_stage"),
+                        "enabled": True,
+                    },
+                },
+            ],
+        }
+        self.channels_path.write_text(json.dumps(self.portfolio_data, indent=2), encoding="utf-8")
+
+        # Initial .clipping_state.json
+        self.initial_state = {
+            "version": "1.0.0",
+            "created_at": "2026-10-12T12:00:00Z",
+            "updated_at": "2026-10-12T12:00:00Z",
+            "current_step": "clipping-publisher",
+            "guidelines_approved": True,
+            "steps": {
+                "clipping-publisher": {
+                    "status": "pending",
+                    "approved": False,
+                    "completed_at": None,
+                    "params": {},
+                }
+            },
+        }
+        self.state_path.write_text(json.dumps(self.initial_state, indent=2), encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def run_cli(self, args: List[str]) -> subprocess.CompletedProcess:
+        cmd = [sys.executable, str(SCRIPT_PATH)] + args
+        return subprocess.run(cmd, cwd=self.tmpdir, capture_output=True, text=True)
+
+    def test_resolve_state_path(self):
+        """Verifies resolve_state_path locates .clipping_state.json across configurations."""
+        import clipping_publisher
+
+        # 1. By explicit state_arg
+        resolved = clipping_publisher.resolve_state_path(state_arg=self.state_path)
+        self.assertEqual(resolved, self.state_path.resolve())
+
+        # 2. By project_dir
+        resolved = clipping_publisher.resolve_state_path(project_dir=self.project_dir)
+        self.assertEqual(resolved, self.state_path.resolve())
+
+        # 3. None when missing
+        resolved = clipping_publisher.resolve_state_path(project_dir=self.project_dir / "nonexistent" / "deep")
+        self.assertIsNone(resolved)
+
+    def test_publish_clip_persists_publication_manifest_to_state(self):
+        """Verifies publish_clip writes structured publication_manifest into .clipping_state.json."""
+        import clipping_publisher
+        from unittest.mock import patch
+
+        # Mock YouTube upload to return a published response without making real API requests
+        mock_resp = {
+            "status": "published",
+            "platform": "YouTube Shorts",
+            "channel_id": "chan-yt-persist-01",
+            "handle": "@YTPersist",
+            "method": "direct_api",
+            "video_id": "vid-12345",
+            "post_url": "https://youtube.com/shorts/vid-12345",
+            "privacy_status": "public",
+            "title": "Hook Title",
+            "clip_id": "clip-persist-01",
+        }
+
+        with patch("clipping_publisher.upload_youtube_shorts", return_value=mock_resp):
+            res = clipping_publisher.publish_clip(
+                channels_path=self.channels_path,
+                video_path=self.video_path,
+                brand_cluster="Persist Brand",
+                clip_id="clip-persist-01",
+                caption_hook="Hook Title",
+                project_dir=self.project_dir,
+                dry_run=False,
+            )
+
+        self.assertIn("publication_manifest", res)
+        self.assertGreaterEqual(len(res["publication_manifest"]), 2)
+
+        # Inspect .clipping_state.json
+        state_data = json.loads(self.state_path.read_text(encoding="utf-8"))
+        step8_params = state_data["steps"]["clipping-publisher"]["params"]
+        self.assertIn("publication_manifest", step8_params)
+        manifest = step8_params["publication_manifest"]
+        self.assertIsInstance(manifest, list)
+        self.assertEqual(len(manifest), 2)
+
+        # Verify entry structure: clip ID, brand cluster, timestamp, delivery methods, post URLs, status
+        for entry in manifest:
+            self.assertEqual(entry["clip_id"], "clip-persist-01")
+            self.assertEqual(entry["brand_cluster"], "Persist Brand")
+            self.assertIn("timestamp", entry)
+            self.assertIn("status", entry)
+            self.assertIn("platform", entry)
+            self.assertIn("channel_id", entry)
+            self.assertTrue("post_url" in entry or "protocol" in entry or "method" in entry)
+
+    def test_cli_publish_persists_publication_manifest(self):
+        """Verifies CLI publish command persists publication_manifest into .clipping_state.json."""
+        from unittest.mock import patch
+
+        # We can run with TikTok only to test without mocking urllib
+        res = self.run_cli([
+            "publish",
+            "--brand-cluster", "Persist Brand",
+            "--platforms", "TikTok",
+            "--channels", str(self.channels_path),
+            "--video", str(self.video_path),
+            "--clip-id", "clip-cli-persist",
+            "--project-dir", str(self.project_dir),
+            "--json",
+        ])
+        self.assertEqual(res.returncode, 0, f"CLI publish failed: {res.stderr}")
+
+        # Check state file
+        state_data = json.loads(self.state_path.read_text(encoding="utf-8"))
+        step8_params = state_data["steps"]["clipping-publisher"]["params"]
+        self.assertIn("publication_manifest", step8_params)
+        manifest = step8_params["publication_manifest"]
+        self.assertEqual(len(manifest), 1)
+        self.assertEqual(manifest[0]["clip_id"], "clip-cli-persist")
+        self.assertEqual(manifest[0]["platform"], "TikTok")
+        self.assertEqual(manifest[0]["status"], "staged_mobile")
+        self.assertEqual(manifest[0]["protocol"], "cloud_folder")
+
+    def test_dry_run_does_not_persist_manifest(self):
+        """Verifies dry-run does not modify .clipping_state.json."""
+        res = self.run_cli([
+            "publish",
+            "--brand-cluster", "Persist Brand",
+            "--channels", str(self.channels_path),
+            "--video", str(self.video_path),
+            "--project-dir", str(self.project_dir),
+            "--dry-run",
+            "--json",
+        ])
+        self.assertEqual(res.returncode, 0)
+
+        # Check state file unchanged
+        state_data = json.loads(self.state_path.read_text(encoding="utf-8"))
+        step8_params = state_data["steps"]["clipping-publisher"]["params"]
+        self.assertNotIn("publication_manifest", step8_params)
+
+
 if __name__ == "__main__":
     unittest.main()

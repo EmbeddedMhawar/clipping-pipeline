@@ -299,6 +299,39 @@ def resolve_channels_path(
     return None
 
 
+def resolve_state_path(
+    project_dir: Optional[Union[str, Path]] = None,
+    state_arg: Optional[Union[str, Path]] = None,
+) -> Optional[Path]:
+    """
+    Resolves the absolute path to .clipping_state.json:
+    1. Explicit state_arg if provided and exists
+    2. project_dir / .clipping_state.json
+    3. project_dir.parent / .clipping_state.json
+    4. Current working directory / .clipping_state.json (if project_dir not specified)
+    """
+    if state_arg:
+        sp = Path(state_arg).resolve()
+        if sp.is_file():
+            return sp
+
+    if project_dir:
+        base = Path(project_dir).resolve()
+        cand = base / STATE_FILENAME
+        if cand.is_file():
+            return cand
+        cand_parent = base.parent / STATE_FILENAME
+        if cand_parent.is_file():
+            return cand_parent
+        return None
+
+    cand_cwd = Path.cwd() / STATE_FILENAME
+    if cand_cwd.is_file():
+        return cand_cwd
+
+    return None
+
+
 def load_portfolio(channels_path: Union[str, Path]) -> Dict[str, Any]:
     """Loads and parses the channels.json portfolio registry."""
     path = Path(channels_path)
@@ -1101,12 +1134,14 @@ def publish_clip(
     privacy_status: str = "public",
     dry_run: bool = False,
     project: Optional[str] = None,
+    project_dir: Optional[Union[str, Path]] = None,
+    state_path: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """
     Executes or simulates multi-platform publishing for a clip across brand cluster channels.
     Delivers rendered video and bundled caption.txt to mobile channels (TikTok, Instagram Reels),
-    executes YouTube Shorts upload (with BrowserOS Neo fallback), and stages daily posting quotas
-    in channels.json.
+    executes YouTube Shorts upload (with BrowserOS Neo fallback), stages daily posting quotas
+    in channels.json, and persists publication_manifest into .clipping_state.json.
     """
     p_path = Path(channels_path).resolve()
     portfolio = load_portfolio(p_path)
@@ -1206,6 +1241,7 @@ def publish_clip(
             if candidate_cap.is_file():
                 c_path = candidate_cap
 
+    now_iso = datetime.now(timezone.utc).isoformat()
     actual_clip_id = (
         clip_id
         or (v_path.stem if v_path else f"clip-{int(datetime.now(timezone.utc).timestamp())}")
@@ -1234,11 +1270,16 @@ def publish_clip(
                 )
 
             entry = {
+                "clip_id": actual_clip_id,
+                "brand_cluster": cluster_name,
+                "timestamp": now_iso,
                 "status": "staged_mobile" if not dry_run else "simulated",
                 "platform": plat,
                 "channel_id": chan.get("id"),
                 "handle": chan.get("handle"),
+                "delivery_method": transfer_res.get("protocol"),
                 "protocol": transfer_res.get("protocol"),
+                "post_url": transfer_res.get("server_url") or transfer_res.get("webhook_url"),
                 "transfer": transfer_res,
                 "caption_bundled": bool(c_path and c_path.is_file()) if not dry_run else bool(caption_content),
             }
@@ -1248,10 +1289,15 @@ def publish_clip(
             if dry_run:
                 has_token, tok_status, _ = check_youtube_token(chan)
                 entry = {
+                    "clip_id": actual_clip_id,
+                    "brand_cluster": cluster_name,
+                    "timestamp": now_iso,
                     "status": "simulated",
                     "platform": plat,
                     "channel_id": chan.get("id"),
                     "handle": chan.get("handle"),
+                    "delivery_method": "direct_api" if has_token else "browseros_neo",
+                    "method": "direct_api" if has_token else "browseros_neo",
                     "token_status": tok_status,
                     "privacy_status": privacy_status,
                     "post_url": "https://youtube.com/shorts/simulated" if has_token else "https://studio.youtube.com",
@@ -1270,6 +1316,10 @@ def publish_clip(
                     portfolio=portfolio,
                     fallback_on_error=True,
                 )
+                yt_res.setdefault("clip_id", actual_clip_id)
+                yt_res.setdefault("brand_cluster", cluster_name)
+                yt_res.setdefault("timestamp", now_iso)
+                yt_res.setdefault("delivery_method", yt_res.get("method", "direct_api"))
                 publication_manifest.append(yt_res)
 
     if dry_run:
@@ -1281,6 +1331,51 @@ def publish_clip(
     else:
         overall_status = "published"
 
+    saved_state_path: Optional[str] = None
+    if not dry_run:
+        s_path = resolve_state_path(project_dir=project_dir, state_arg=state_path)
+        if s_path is None:
+            cand_p = p_path.parent / STATE_FILENAME
+            if cand_p.is_file():
+                s_path = cand_p
+            elif (Path.cwd() / STATE_FILENAME).is_file():
+                s_path = Path.cwd() / STATE_FILENAME
+            elif v_path and (v_path.parent / STATE_FILENAME).is_file():
+                s_path = v_path.parent / STATE_FILENAME
+
+        if s_path and s_path.is_file():
+            try:
+                with open(s_path, "r", encoding="utf-8") as f:
+                    state_data = json.load(f)
+
+                if "steps" not in state_data:
+                    state_data["steps"] = {}
+                if "clipping-publisher" not in state_data["steps"]:
+                    state_data["steps"]["clipping-publisher"] = {
+                        "status": "pending",
+                        "approved": False,
+                        "completed_at": None,
+                        "params": {},
+                    }
+
+                step8 = state_data["steps"]["clipping-publisher"]
+                if "params" not in step8:
+                    step8["params"] = {}
+
+                step8["params"]["publication_manifest"] = publication_manifest
+                step8["params"]["clip_id"] = actual_clip_id
+                step8["params"]["brand_cluster"] = cluster_name
+                step8["params"]["timestamp"] = now_iso
+                step8["params"]["status"] = overall_status
+                state_data["updated_at"] = now_iso
+
+                with open(s_path, "w", encoding="utf-8") as f:
+                    json.dump(state_data, f, indent=2, ensure_ascii=False)
+                    f.write("\n")
+                saved_state_path = str(s_path)
+            except Exception as e:
+                sys.stderr.write(f"Warning: Failed to update state at {s_path}: {e}\n")
+
     return {
         "status": overall_status,
         "brand_cluster": cluster_name,
@@ -1291,6 +1386,7 @@ def publish_clip(
         "allocated_count": len(allocated),
         "targets": allocated,
         "publication_manifest": publication_manifest,
+        "state_path": saved_state_path,
     }
 
 
@@ -1320,6 +1416,8 @@ def cmd_publish(args: argparse.Namespace) -> int:
             privacy_status=getattr(args, "privacy_status", "public"),
             dry_run=args.dry_run,
             project=getattr(args, "project", None),
+            project_dir=getattr(args, "project_dir", None),
+            state_path=getattr(args, "state", None),
         )
     except (ValueError, FileNotFoundError, DuplicatePlatformError) as e:
         sys.stderr.write(f"Error: {e}\n")
@@ -1444,6 +1542,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_pub.add_argument("--caption-file", default=None, help="Path to existing caption text file")
     p_pub.add_argument("--privacy-status", choices=["public", "unlisted", "private"], default="public", help="YouTube Shorts privacy visibility status (default: public)")
     p_pub.add_argument("--project", default=None, help="Campaign or project slug")
+    p_pub.add_argument("--state", "--state-file", dest="state", default=None, help="Path to .clipping_state.json")
     p_pub.add_argument("--dry-run", action="store_true", help="Validate allocation without executing transfers")
     p_pub.add_argument("--json", action="store_true", help="Output JSON format")
 

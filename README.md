@@ -12,13 +12,13 @@
 
 The pipeline unifies two proven frameworks:
 1. **Cole Corcoran's AI Clipping Framework**: Strict Hook $\rightarrow$ Story $\rightarrow$ Payoff architecture, dead-air pruning ($>0.4$s), kinetic word-by-word subtitles, Tier-1 audience targeting ($\ge 40\%$ US/UK/CA), and 30-minute Whop submission compliance.
-2. **Storyteller FilmCraft 7-Subagent Pipeline**: Gated modular execution where each editing step receives isolated, pre-digested configuration slices, strictly controlled by a deterministic state engine.
+2. **Storyteller FilmCraft 8-Subagent Pipeline**: Gated modular execution where each editing and distribution step receives isolated, pre-digested configuration slices, strictly controlled by a deterministic state engine.
 
 ---
 
-## Architecture & 7-Step Sequence
+## Architecture & 8-Step Sequence
 
-The pipeline executes as a sequential, gated 7-step process. Downstream editing subagents are blocked until upstream steps and pre-flight gates are validated and approved.
+The pipeline executes as a sequential, gated 8-step process. Downstream editing and publishing subagents are blocked until upstream steps and pre-flight gates are validated and approved.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -53,18 +53,26 @@ The pipeline executes as a sequential, gated 7-step process. Downstream editing 
 │                              ▼                                                                  │
 │  [Step 7: clipping-qc-packager]                                                                 │
 │   - EBU R128 -14 LUFS loudness check, 12 approved closers, Whop metadata                        │
+│                              │                                                                  │
+│                              ▼  (Pre-flight Gate: clipping-qc-packager approved)                │
+│  [Step 8: clipping-publisher]                                                                   │
+│   - Brand Cluster matching, zero duplicate same-platform allocation, warmup gating              │
+│   - YouTube Shorts upload (Data API v3 + BrowserOS Neo fallback)                                │
+│   - TikTok & Instagram Reels mobile delivery with companion caption bundling                    │
+│   - Quota staging in channels.json & publication_manifest persistence in state                  │
 │                                                                                                 │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### The 7 Steps:
+### The 8 Steps:
 1. **`clipping-guidelines`**: Ingests campaign briefs, enforces non-negotiables, injects Tier-1 defaults (`[Default Applied]`), and produces a user approval artifact.
 2. **`clipping-transcription`**: Generates diarized transcription with word timestamps and phonetic fixes.
 3. **`clipping-hook-hunter`**: Ranks viral hooks and defines the 0–3s hook snippet and curiosity loops.
 4. **`clipping-assembly`**: Sets up 9:16 vertical canvas, speaker framing, and removes dead air $>0.4$s (preserving 80ms consonant buffers).
 5. **`clipping-captions`**: Renders high-contrast kinetic subtitles placed clear of mobile UI overlays.
 6. **`clipping-vfx-sfx`**: Enforces persistent watermark placement and adds punctuation sound design without speech clashing.
-7. **`clipping-qc-packager`**: Performs final compliance audit (loudness, closers, metadata) and generates ready-to-post packages within the 30-minute Whop submission window.
+7. **`clipping-qc-packager`**: Performs compliance audit (loudness, closers, metadata) and generates ready-to-post packages within the 30-minute Whop submission window (decoupled from channel distribution per ADR 0010).
+8. **`clipping-publisher`**: Distributes clips across brand cluster channels with zero same-platform duplication, enforces warmup gating, uploads YouTube Shorts with BrowserOS Neo fallback, delivers mobile packages with caption bundling, stages portfolio quotas, and generates structured `publication_manifest` receipts.
 
 ---
 
@@ -108,6 +116,28 @@ python3 scripts/clipping_state.py get-step-config --step clipping-captions --dir
 - If a required prerequisite is not met, `validate` exits with code `2` and outputs a blocking message to `stderr`.
 - An optional `--force` flag allows manual override for debugging or development, exiting with code `0` and a warning.
 
+### 3. Publisher Engine CLI (`scripts/clipping_publisher.py`)
+
+Step 8 executes multi-platform distribution and persists publication manifests:
+
+```bash
+# Check brand clusters and channel eligibility status
+python3 scripts/clipping_publisher.py status --brand-cluster "My Brand" --channels channels.json
+
+# Verify configured YouTube OAuth tokens
+python3 scripts/clipping_publisher.py verify-tokens --channels channels.json
+
+# Publish clip across eligible brand cluster channels
+python3 scripts/clipping_publisher.py publish \
+  --brand-cluster "My Brand" \
+  --channels channels.json \
+  --video /path/to/clip.mp4 \
+  --clip-id "clip-001" \
+  --caption-hook "Viral Hook Headline" \
+  --caption-closer "Follow for part 2!" \
+  --project-dir /path/to/project
+```
+
 ---
 
 ## Installation
@@ -141,6 +171,7 @@ clipping-pipeline/
 ├── scripts/
 │   ├── clipping_state.py       # State engine CLI & pre-flight gate validator
 │   ├── clipping_channels.py    # Channel portfolio & warmup management engine
+│   ├── clipping_publisher.py   # Multi-platform publishing engine (Step 8)
 │   └── ingest_guidelines.py    # Guidelines normalizer & review artifact generator
 ├── references/
 │   ├── CAMPAIGN_BRIEF_SCHEMA.md    # Normalized schema specification & JSON schema
@@ -150,16 +181,21 @@ clipping-pipeline/
 │   │   └── SKILL.md
 │   ├── clipping-guidelines/    # Campaign ingestion & review gate skill
 │   │   └── SKILL.md
-│   └── clipping-channels/      # Channel portfolio & warmup management skill
+│   ├── clipping-channels/      # Channel portfolio & warmup management skill
+│   │   └── SKILL.md
+│   └── clipping-publisher/     # Multi-platform publishing skill (Step 8)
 │       └── SKILL.md
 └── tests/
-    ├── test_plugin_manifest.py # Plugin manifest test suite
-    ├── test_clipping_state.py  # State engine CLI & pre-flight test suite
-    ├── test_guidelines_skill.py# Guidelines ingestion & schema test suite
-    ├── test_router_skill.py    # Master router skill test suite
-    ├── test_channels.py        # Channel portfolio CLI test suite
-    ├── test_channel_schema.py  # Channel schema validator test suite
-    └── test_channels_skill.py  # Channel companion skill test suite
+    ├── test_plugin_manifest.py         # Plugin manifest test suite
+    ├── test_clipping_state.py          # State engine CLI & pre-flight test suite
+    ├── test_clipping_publisher.py      # Publisher CLI & brand cluster test suite
+    ├── test_guidelines_skill.py        # Guidelines ingestion & schema test suite
+    ├── test_router_skill.py            # Master router skill test suite
+    ├── test_publisher_skill.py         # Publisher skill test suite
+    ├── test_channels.py                # Channel portfolio CLI test suite
+    ├── test_channel_schema.py          # Channel schema validator test suite
+    ├── test_channels_skill.py          # Channel companion skill test suite
+    └── test_e2e_publishing_pipeline.py # End-to-end 8-step pipeline test suite
 ```
 
 ---
