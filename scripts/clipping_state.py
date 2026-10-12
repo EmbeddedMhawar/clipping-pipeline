@@ -8,6 +8,7 @@ Zero external runtime dependencies (stdlib only).
 """
 
 import argparse
+import copy
 import json
 import os
 import sys
@@ -16,6 +17,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 STATE_FILENAME = ".clipping_state.json"
+CHANNELS_FILENAME = "channels.json"
+
+PLATFORM_ALIASES: Dict[str, str] = {
+    "tiktok": "TikTok",
+    "instagram": "Instagram Reels",
+    "instagram reels": "Instagram Reels",
+    "ig": "Instagram Reels",
+    "reels": "Instagram Reels",
+    "youtube": "YouTube Shorts",
+    "youtube shorts": "YouTube Shorts",
+    "yt": "YouTube Shorts",
+    "shorts": "YouTube Shorts",
+}
 
 PIPELINE_STEPS: List[str] = [
     "clipping-guidelines",
@@ -98,6 +112,161 @@ def _is_step_completed(step_data: Dict[str, Any]) -> bool:
         or step_data.get("approved") is True
         or step_data.get("completed_at") is not None
     )
+
+
+def _normalize_platform(plat: str) -> str:
+    key = str(plat).strip().lower()
+    return PLATFORM_ALIASES.get(key, plat)
+
+
+def _resolve_channels_path(
+    project_dir: Optional[Path] = None, channels_arg: Optional[str] = None
+) -> Optional[Path]:
+    if channels_arg:
+        cp = Path(channels_arg).resolve()
+        if cp.is_file():
+            return cp
+    base = project_dir if project_dir else Path.cwd()
+    # 1. Project directory
+    cand = base / CHANNELS_FILENAME
+    if cand.is_file():
+        return cand
+    # 2. Parent directory (e.g. workspace level)
+    cand_parent = base.parent / CHANNELS_FILENAME
+    if cand_parent.is_file():
+        return cand_parent
+    # 3. Current working directory
+    cand_cwd = Path.cwd() / CHANNELS_FILENAME
+    if cand_cwd.is_file():
+        return cand_cwd
+    return None
+
+
+def _bridge_step7_channels(
+    step_params: Dict[str, Any], state: Dict[str, Any], channels_file: Optional[Path]
+) -> Dict[str, Any]:
+    default_dt = {
+        "protocol": "qr_code",
+        "target": "http://127.0.0.1:8080",
+        "enabled": True,
+    }
+
+    if not channels_file or not channels_file.is_file():
+        step_params.setdefault("eligible_channels", [])
+        step_params.setdefault("ineligible_channels", [])
+        step_params.setdefault("default_device_transfer", default_dt)
+        step_params.setdefault("device_transfer", default_dt)
+        return step_params
+
+    try:
+        with open(channels_file, "r", encoding="utf-8") as f:
+            portfolio = json.load(f)
+    except Exception as e:
+        sys.stderr.write(f"Warning: Failed to load {channels_file}: {e}\n")
+        step_params.setdefault("eligible_channels", [])
+        step_params.setdefault("ineligible_channels", [])
+        step_params.setdefault("default_device_transfer", default_dt)
+        step_params.setdefault("device_transfer", default_dt)
+        return step_params
+
+    default_dt = portfolio.get("default_device_transfer", default_dt)
+    step_params["default_device_transfer"] = default_dt
+    step_params["device_transfer"] = default_dt
+
+    campaign = state.get("campaign", {})
+    raw_campaign_platforms = campaign.get("platforms")
+    if not raw_campaign_platforms:
+        raw_campaign_platforms = (
+            state.get("steps", {})
+            .get("clipping-guidelines", {})
+            .get("params", {})
+            .get("platforms", [])
+        )
+    if not raw_campaign_platforms:
+        raw_campaign_platforms = ["TikTok", "Instagram Reels", "YouTube Shorts"]
+
+    campaign_platforms_normalized = {
+        _normalize_platform(p).lower() for p in raw_campaign_platforms
+    }
+
+    eligible_channels: List[Dict[str, Any]] = []
+    ineligible_channels: List[Dict[str, Any]] = []
+
+    for chan in portfolio.get("channels", []):
+        chan_copy = copy.deepcopy(chan)
+        if "device_transfer" not in chan_copy:
+            chan_copy["device_transfer"] = copy.deepcopy(default_dt)
+
+        chan_id = chan_copy.get("id", "unknown")
+        raw_platform = chan_copy.get("platform", "")
+        norm_platform = _normalize_platform(raw_platform)
+        stage = chan_copy.get("stage", "")
+        status = chan_copy.get("status", "active")
+        health_status = chan_copy.get("health_status", status)
+
+        cadence = chan_copy.get("posting_cadence", {})
+        posts_today = cadence.get("posts_today", 0)
+        daily_post_cap = cadence.get("daily_post_limit", cadence.get("daily_post_cap", 0))
+
+        cooldown_data = chan_copy.get("cooldown", {})
+        in_cooldown = (
+            status == "cooldown"
+            or health_status == "cooldown"
+            or stage == "Account Cooldown"
+            or cooldown_data.get("in_cooldown") is True
+            or chan_copy.get("health_gate", {}).get("suppression_detected") is True
+        )
+
+        # Condition 1: Matching platform
+        if norm_platform.lower() not in campaign_platforms_normalized:
+            ineligible_channels.append(
+                {
+                    "id": chan_id,
+                    "platform": raw_platform,
+                    "handle": chan_copy.get("handle", ""),
+                    "reason": f"Platform mismatch: platform '{raw_platform}' is not in campaign target platforms ({list(raw_campaign_platforms)})",
+                    "channel": chan_copy,
+                }
+            )
+            continue
+
+        # Condition 2: health_status != 'cooldown' and not in cooldown
+        if in_cooldown:
+            cd_reason = cooldown_data.get("reason") or "72h account suppression cooldown active"
+            ineligible_channels.append(
+                {
+                    "id": chan_id,
+                    "platform": raw_platform,
+                    "handle": chan_copy.get("handle", ""),
+                    "reason": f"Account in cooldown: {cd_reason}",
+                    "channel": chan_copy,
+                }
+            )
+            continue
+
+        # Condition 3: posts_today < daily_post_cap
+        if posts_today >= daily_post_cap:
+            if stage == "Cold Lurker" or daily_post_cap == 0:
+                reason_str = f"Daily post capacity reached: {stage} stage permits 0 posts per day (daily post limit: 0)"
+            else:
+                reason_str = f"Daily post capacity reached ({posts_today}/{daily_post_cap} posts published today, daily post limit reached)"
+            ineligible_channels.append(
+                {
+                    "id": chan_id,
+                    "platform": raw_platform,
+                    "handle": chan_copy.get("handle", ""),
+                    "reason": reason_str,
+                    "channel": chan_copy,
+                }
+            )
+            continue
+
+        # Passed all 3 criteria -> Eligible
+        eligible_channels.append(chan_copy)
+
+    step_params["eligible_channels"] = eligible_channels
+    step_params["ineligible_channels"] = ineligible_channels
+    return step_params
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -349,6 +518,11 @@ def cmd_ingest_brief(args: argparse.Namespace) -> int:
     }
     state["guidelines_approved"] = False
 
+    channels_file = _resolve_channels_path(
+        state_path.parent, getattr(args, "channels", None)
+    )
+    qc_packager_slice = _bridge_step7_channels(qc_packager_slice, state, channels_file)
+
     if "steps" not in state:
         state["steps"] = {}
 
@@ -442,7 +616,14 @@ def cmd_get_step_config(args: argparse.Namespace) -> int:
         sys.stderr.write(f"Error: Step '{step_name}' not found in state steps.\n")
         return 1
 
-    step_params = state["steps"][step_name].get("params", {})
+    step_params = copy.deepcopy(state["steps"][step_name].get("params", {}))
+
+    if step_name == "clipping-qc-packager":
+        channels_file = _resolve_channels_path(
+            state_path.parent, getattr(args, "channels", None)
+        )
+        step_params = _bridge_step7_channels(step_params, state, channels_file)
+
     print(json.dumps(step_params, indent=2, ensure_ascii=False))
     return 0
 
@@ -462,6 +643,17 @@ def cmd_validate(args: argparse.Namespace) -> int:
         return 1
 
     steps_state = state.get("steps", {})
+
+    # Check 0: Step 1 guidelines advisory check for channels.json
+    if step_name == "clipping-guidelines":
+        channels_file = _resolve_channels_path(
+            state_path.parent, getattr(args, "channels", None)
+        )
+        if not channels_file:
+            sys.stderr.write(
+                "[Notice] Workspace channel portfolio (channels.json) not found. "
+                "Run 'python3 scripts/clipping_channels.py init' if managing multi-channel warmup.\n"
+            )
 
     # Check 1: Any step after clipping-guidelines requires guidelines_approved == True
     if step_name != "clipping-guidelines":
@@ -493,6 +685,20 @@ def cmd_status(args: argparse.Namespace) -> int:
     state_path = _get_state_path(args.dir)
     state = _load_state(state_path)
 
+    channels_file = _resolve_channels_path(
+        state_path.parent, getattr(args, "channels", None)
+    )
+
+    if not channels_file:
+        sys.stderr.write(
+            "[Notice] Workspace channel portfolio (channels.json) not found. "
+            "Run 'python3 scripts/clipping_channels.py init' if managing multi-channel warmup.\n"
+        )
+        state["portfolio_notice"] = (
+            "[Notice] Workspace channel portfolio (channels.json) not found. "
+            "Run 'python3 scripts/clipping_channels.py init' if managing multi-channel warmup."
+        )
+
     if args.json:
         print(json.dumps(state, indent=2, ensure_ascii=False))
         return 0
@@ -519,6 +725,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Campaign:     {campaign_title} ({project})")
     print(f"Client:       {client}")
     print(f"Guidelines:   {'[APPROVED]' if guidelines_appr else '[AWAITING APPROVAL / PENDING]'}")
+    if channels_file:
+        print(f"Portfolio:    [CONFIGURED] {channels_file.name}")
+    else:
+        print("Portfolio:    [NOTICE] channels.json not found (run 'python3 scripts/clipping_channels.py init')")
     print(f"Current Step: {current_step}")
     print(f"Next Step:    {next_step or 'None (All steps completed)'}")
     print("-" * 80)
@@ -551,6 +761,7 @@ def main() -> None:
     p_ingest = subparsers.add_parser("ingest-brief", help="Ingest campaign brief JSON")
     p_ingest.add_argument("--brief", required=True, help="Path to campaign_brief.json")
     p_ingest.add_argument("--dir", default=None, help="Target project directory")
+    p_ingest.add_argument("--channels", default=None, help="Path to channels.json")
 
     # approve
     p_approve = subparsers.add_parser("approve", help="Approve step / guidelines")
@@ -572,6 +783,7 @@ def main() -> None:
     p_get = subparsers.add_parser("get-step-config", help="Get step configuration slice")
     p_get.add_argument("--step", required=True, help="Step name to retrieve params for")
     p_get.add_argument("--dir", default=None, help="Target project directory")
+    p_get.add_argument("--channels", default=None, help="Path to channels.json")
     p_get.add_argument("--json", action="store_true", help="Output in JSON format (default)")
 
     # validate
@@ -580,6 +792,7 @@ def main() -> None:
     )
     p_validate.add_argument("--step", required=True, help="Step to validate")
     p_validate.add_argument("--dir", default=None, help="Target project directory")
+    p_validate.add_argument("--channels", default=None, help="Path to channels.json")
     p_validate.add_argument(
         "--force", action="store_true", help="Bypass gate failure with warning"
     )
@@ -587,6 +800,7 @@ def main() -> None:
     # status
     p_status = subparsers.add_parser("status", help="Show pipeline status")
     p_status.add_argument("--dir", default=None, help="Target project directory")
+    p_status.add_argument("--channels", default=None, help="Path to channels.json")
     p_status.add_argument("--json", action="store_true", help="Output status as JSON")
 
     args = parser.parse_args()
