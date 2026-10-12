@@ -1,0 +1,13 @@
+{
+  "name": "clipping-pipeline",
+  "displayName": "Short-Form Clipping Pipeline",
+  "version": "1.0.0",
+  "description": "Enterprise-grade short-form video clipping pipeline for reward campaigns (Whop, TikTok, Reels, YouTube Shorts). Ingests campaign briefs, enforces viral guidelines, manages pre-flight gates, and orchestrates the 7-step clipping workflow.",
+  "author": "Abderrahmane Mhawar",
+  "repository": "https://github.com/EmbeddedMhawar/clipping-pipeline",
+  "suggestedPrompts": [
+    "Ingest campaign guidelines and set up a new clipping project",
+    "Run the short-form clipping pipeline for my video project",
+    "Check clipping pipeline status and validate pre-flight gates"
+  ]
+}
