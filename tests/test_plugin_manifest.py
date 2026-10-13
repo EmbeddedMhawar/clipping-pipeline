@@ -91,6 +91,7 @@ class TestPluginManifest(unittest.TestCase):
             "clipping-pipeline",
             "clipping-guidelines",
             "clipping-channels",
+            "clipping-publisher",
         ]
         for skill in expected_skills:
             skill_dir = self.repo_root / "skills" / skill
@@ -113,7 +114,7 @@ class TestPluginManifest(unittest.TestCase):
             "clipping-pipeline",
             "Installation",
             "Architecture",
-            "7-Step",
+            "8-Step",
             "scripts/clipping_state.py",
         ]
         for section in required_sections:

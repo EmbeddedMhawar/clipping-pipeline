@@ -76,6 +76,7 @@ class TestClippingStateCLI(unittest.TestCase):
             "clipping-captions",
             "clipping-vfx-sfx",
             "clipping-qc-packager",
+            "clipping-publisher",
         ]
         for step in expected_steps:
             self.assertIn(step, state["steps"])
@@ -236,6 +237,7 @@ class TestClippingStateCLI(unittest.TestCase):
             "clipping-captions",
             "clipping-vfx-sfx",
             "clipping-qc-packager",
+            "clipping-publisher",
         ]
         for step in steps:
             res = self.run_cli(
@@ -385,6 +387,7 @@ class TestClippingStateCLI(unittest.TestCase):
             "clipping-captions",
             "clipping-vfx-sfx",
             "clipping-qc-packager",
+            "clipping-publisher",
         ]
 
         for i, step in enumerate(steps):
@@ -417,6 +420,15 @@ class TestClippingStateCLI(unittest.TestCase):
                 ["validate", "--step", step, "--dir", str(self.project_dir)]
             )
             self.assertEqual(chk_ok.returncode, 0, f"Step {step} should be unblocked")
+
+        # Inject publication manifest before approving final step (clipping-publisher)
+        with open(self.state_file, "r", encoding="utf-8") as f:
+            state_data = json.load(f)
+        state_data["steps"]["clipping-publisher"]["params"]["publication_manifest"] = [
+            {"status": "published", "channel_id": "chan-01"}
+        ]
+        with open(self.state_file, "w", encoding="utf-8") as f:
+            json.dump(state_data, f, indent=2)
 
         # Approve final step
         self.run_cli(
@@ -486,6 +498,142 @@ class TestClippingStateCLI(unittest.TestCase):
         vfx_params = steps["clipping-vfx-sfx"]["params"]
         self.assertEqual(vfx_params.get("watermark_asset"), "")
 
+    def test_step8_publisher_preflight_gating(self):
+        # 1. Init state
+        self.run_cli(["init", "--dir", str(self.project_dir)], check=True)
+
+        # 2. Step 8 validate should fail because guidelines not approved (exit code 2)
+        res_step8_no_guide = self.run_cli(
+            ["validate", "--step", "clipping-publisher", "--dir", str(self.project_dir)]
+        )
+        self.assertEqual(res_step8_no_guide.returncode, 2)
+        self.assertIn(
+            "Pre-flight Gate Blocked: Campaign guidelines must be approved before running 'clipping-publisher'.",
+            res_step8_no_guide.stderr,
+        )
+
+        # 3. Approve guidelines
+        self.run_cli(
+            ["approve", "--step", "clipping-guidelines", "--dir", str(self.project_dir)],
+            check=True,
+        )
+
+        # 4. Step 8 validate should still fail because Step 7 (clipping-qc-packager) is not completed (exit code 2)
+        res_step8_unapproved = self.run_cli(
+            ["validate", "--step", "clipping-publisher", "--dir", str(self.project_dir)]
+        )
+        self.assertEqual(res_step8_unapproved.returncode, 2)
+        self.assertIn(
+            "Final QC packaging must be completed before distribution/publishing.",
+            res_step8_unapproved.stderr,
+        )
+
+        # 5. Step 8 validate with --force should pass with code 0
+        res_step8_forced = self.run_cli(
+            ["validate", "--step", "clipping-publisher", "--force", "--dir", str(self.project_dir)]
+        )
+        self.assertEqual(res_step8_forced.returncode, 0)
+
+        # 6. Approve intermediate steps up to step 7
+        intermediate_steps = [
+            "clipping-transcription",
+            "clipping-hook-hunter",
+            "clipping-assembly",
+            "clipping-captions",
+            "clipping-vfx-sfx",
+            "clipping-qc-packager",
+        ]
+        for step in intermediate_steps:
+            self.run_cli(["approve", "--step", step, "--dir", str(self.project_dir)], check=True)
+
+        # 7. Now Step 8 validate must pass (exit code 0)
+        res_step8_approved = self.run_cli(
+            ["validate", "--step", "clipping-publisher", "--dir", str(self.project_dir)]
+        )
+        self.assertEqual(res_step8_approved.returncode, 0)
+        self.assertIn("Pre-flight Gate Passed", res_step8_approved.stdout)
+
+    def test_step7_decoupled_from_channels(self):
+        self.run_cli(["init", "--dir", str(self.project_dir)], check=True)
+
+        brief_data = {
+            "campaign": {"title": "Test QC Decoupled", "project": "test-qc"},
+            "global_rules": {
+                "audio": {"loudness_target_lufs": -14.0},
+                "caption_closers": ["closer1", "closer2"],
+            },
+        }
+        brief_path = self.project_dir / "campaign_brief.json"
+        brief_path.write_text(json.dumps(brief_data), encoding="utf-8")
+
+        self.run_cli(
+            ["ingest-brief", "--brief", str(brief_path), "--dir", str(self.project_dir)],
+            check=True,
+        )
+
+        # Ensure channels.json does NOT exist in project
+        self.assertFalse((self.project_dir / "channels.json").exists())
+
+        # Calling get-step-config for Step 7 must succeed without channels.json
+        res = self.run_cli(
+            ["get-step-config", "--step", "clipping-qc-packager", "--dir", str(self.project_dir)]
+        )
+        self.assertEqual(res.returncode, 0)
+        qc_params = json.loads(res.stdout)
+
+        # Step 7 must not contain channel lists or device transfer configs
+        self.assertNotIn("eligible_channels", qc_params)
+        self.assertNotIn("ineligible_channels", qc_params)
+        self.assertNotIn("device_transfer", qc_params)
+        self.assertNotIn("default_device_transfer", qc_params)
+
+        # Must still contain QC parameters
+        self.assertEqual(qc_params.get("target_loudness_lufs"), -14.0)
+        self.assertEqual(qc_params.get("caption_closers"), ["closer1", "closer2"])
+
+    def test_approve_step8_without_manifest_fails(self):
+        """Verifies approve --step clipping-publisher rejects with exit code 1 if publication_manifest is missing."""
+        self.run_cli(["init", "--dir", str(self.project_dir)], check=True)
+        res = self.run_cli(["approve", "--step", "clipping-publisher", "--dir", str(self.project_dir)])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("publication_manifest", res.stderr.lower())
+
+    def test_approve_step8_with_force_bypasses_manifest_check(self):
+        """Verifies approve --step clipping-publisher --force succeeds even when publication_manifest is missing."""
+        self.run_cli(["init", "--dir", str(self.project_dir)], check=True)
+        res = self.run_cli(["approve", "--step", "clipping-publisher", "--force", "--dir", str(self.project_dir)])
+        self.assertEqual(res.returncode, 0)
+        with open(self.state_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        self.assertTrue(state["steps"]["clipping-publisher"]["approved"])
+        self.assertEqual(state["steps"]["clipping-publisher"]["status"], "completed")
+
+    def test_approve_step8_with_manifest_succeeds(self):
+        """Verifies approve --step clipping-publisher succeeds with exit code 0 when publication_manifest is present."""
+        self.run_cli(["init", "--dir", str(self.project_dir)], check=True)
+        # Manually inject a publication manifest into step 8 params
+        with open(self.state_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        state["steps"]["clipping-publisher"]["params"]["publication_manifest"] = [
+            {
+                "status": "published",
+                "platform": "YouTube Shorts",
+                "channel_id": "chan-yt-01",
+                "post_url": "https://youtube.com/shorts/test1234",
+            }
+        ]
+        with open(self.state_file, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+
+        res = self.run_cli(["approve", "--step", "clipping-publisher", "--dir", str(self.project_dir)])
+        self.assertEqual(res.returncode, 0)
+        with open(self.state_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        self.assertTrue(state["steps"]["clipping-publisher"]["approved"])
+        self.assertEqual(state["steps"]["clipping-publisher"]["status"], "completed")
+        self.assertIsNotNone(state["steps"]["clipping-publisher"]["completed_at"])
+
 
 if __name__ == "__main__":
     unittest.main()
+

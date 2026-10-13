@@ -2,16 +2,11 @@
 """
 tests/test_channels_pipeline_bridge.py
 
-Test suite for Ticket #13:
-- Channel portfolio bridge between workspace-level channels.json and clipping pipeline
+Test suite for Channel Portfolio Bridge:
 - Non-blocking advisory notice when channels.json is missing during Step 1 guidelines validation or status check
-- Step 7 (clipping-qc-packager) get-step-config filtering of eligible_channels:
-  * Matching campaign platforms
-  * health_status != 'cooldown' (and not in Account Cooldown)
-  * posts_today < daily_post_cap (daily post limit)
-- Flagging channels in cooldown or at daily capacity as ineligible with reasons
-- Device transfer configuration passed into Step 7 slice
-- Documentation of portfolio bridge and Step 7 device delivery in skills/clipping-pipeline/SKILL.md
+- No advisory notice when channels.json is present
+- Step 7 (clipping-qc-packager) decoupling: pure QC packaging parameters without channels.json dependency
+- Documentation of portfolio bridge and device delivery in skills/clipping-pipeline/SKILL.md
 """
 
 import json
@@ -198,8 +193,8 @@ class TestChannelsPipelineBridge(unittest.TestCase):
         self.assertNotIn("channels.json) not found", res.stderr)
         self.assertNotIn("channels.json not found", res.stderr)
 
-    def test_step7_config_includes_eligible_channels(self):
-        """Step 7 (clipping-qc-packager) get-step-config includes eligible_channels matching platforms and capacity."""
+    def test_step7_config_decoupled_from_channels_portfolio(self):
+        """Step 7 (clipping-qc-packager) get-step-config is decoupled from channels.json and does not include channels."""
         brief_path = self._create_sample_brief(platforms=["TikTok", "Instagram Reels", "YouTube Shorts"])
         self._ingest_brief(brief_path)
 
@@ -217,56 +212,10 @@ class TestChannelsPipelineBridge(unittest.TestCase):
                     "id": "chan-tt-01",
                     "platform": "TikTok",
                     "handle": "@tt_viral",
-                    "stage": "Seeding",
-                    "status": "active",
-                    "posting_cadence": {
-                        "daily_post_limit": 1,
-                        "posts_today": 0,
-                    },
-                    "health_gate": {"cleared_health_gate": False},
-                    "cooldown": {"in_cooldown": False},
-                    "device_transfer": {
-                        "protocol": "qr_code",
-                        "target": "http://127.0.0.1:8080",
-                        "enabled": True,
-                    },
-                },
-                {
-                    "id": "chan-ig-01",
-                    "platform": "Instagram Reels",
-                    "handle": "@ig_clips",
-                    "stage": "Ramp-Up",
-                    "status": "active",
-                    "posting_cadence": {
-                        "daily_post_limit": 3,
-                        "posts_today": 1,
-                    },
-                    "health_gate": {"cleared_health_gate": True},
-                    "cooldown": {"in_cooldown": False},
-                    "device_transfer": {
-                        "protocol": "adb_push",
-                        "target": "/sdcard/DCIM/Camera/",
-                        "enabled": True,
-                    },
-                },
-                {
-                    "id": "chan-yt-01",
-                    "platform": "YouTube Shorts",
-                    "handle": "@yt_shorts",
                     "stage": "Mature",
                     "status": "active",
-                    "posting_cadence": {
-                        "daily_post_limit": 4,
-                        "posts_today": 2,
-                    },
-                    "health_gate": {"cleared_health_gate": True},
-                    "cooldown": {"in_cooldown": False},
-                    "device_transfer": {
-                        "protocol": "cloud_sync",
-                        "target": "/home/user/Clips",
-                        "enabled": True,
-                    },
-                },
+                    "posting_cadence": {"daily_post_limit": 4, "posts_today": 0},
+                }
             ],
         }
         with open(self.channels_path, "w", encoding="utf-8") as f:
@@ -285,174 +234,24 @@ class TestChannelsPipelineBridge(unittest.TestCase):
         self.assertEqual(res.returncode, 0, f"get-step-config failed: {res.stderr}")
 
         config = json.loads(res.stdout)
-        self.assertIn("eligible_channels", config)
-        eligible_ids = [c["id"] for c in config["eligible_channels"]]
-        self.assertEqual(set(eligible_ids), {"chan-tt-01", "chan-ig-01", "chan-yt-01"})
+        # Step 7 must not include eligible/ineligible channels or device transfer
+        self.assertNotIn("eligible_channels", config)
+        self.assertNotIn("ineligible_channels", config)
+        self.assertNotIn("device_transfer", config)
+        self.assertNotIn("default_device_transfer", config)
 
-    def test_step7_config_flags_ineligible_channels_with_reasons(self):
-        """Step 7 flags channels in cooldown or at daily capacity as ineligible with specific reasons."""
-        brief_path = self._create_sample_brief(platforms=["TikTok", "Instagram Reels", "YouTube Shorts"])
-        self._ingest_brief(brief_path)
+        # Step 7 must retain pure QC packaging parameters
+        self.assertIn("target_loudness_lufs", config)
+        self.assertIn("caption_closers", config)
+        self.assertIn("submission_rules", config)
 
-        portfolio = {
-            "version": "1.0.0",
-            "channels": [
-                # 1. Eligible channel
-                {
-                    "id": "chan-tt-ok",
-                    "platform": "TikTok",
-                    "handle": "@tt_ok",
-                    "stage": "Ramp-Up",
-                    "status": "active",
-                    "posting_cadence": {"daily_post_limit": 3, "posts_today": 0},
-                    "cooldown": {"in_cooldown": False},
-                },
-                # 2. Ineligible: In cooldown (status: 'cooldown')
-                {
-                    "id": "chan-tt-cd1",
-                    "platform": "TikTok",
-                    "handle": "@tt_cd1",
-                    "stage": "Account Cooldown",
-                    "status": "cooldown",
-                    "posting_cadence": {"daily_post_limit": 0, "posts_today": 0},
-                    "cooldown": {
-                        "in_cooldown": True,
-                        "reason": "0-view shadowban detected",
-                    },
-                },
-                # 3. Ineligible: health_status = 'cooldown' or in_cooldown = True
-                {
-                    "id": "chan-ig-cd2",
-                    "platform": "Instagram Reels",
-                    "handle": "@ig_cd2",
-                    "stage": "Seeding",
-                    "health_status": "cooldown",
-                    "status": "cooldown",
-                    "posting_cadence": {"daily_post_limit": 1, "posts_today": 0},
-                    "cooldown": {"in_cooldown": True, "reason": "view suppression"},
-                },
-                # 4. Ineligible: At daily capacity (posts_today == daily_post_limit)
-                {
-                    "id": "chan-yt-full",
-                    "platform": "YouTube Shorts",
-                    "handle": "@yt_full",
-                    "stage": "Mature",
-                    "status": "active",
-                    "posting_cadence": {"daily_post_limit": 2, "posts_today": 2},
-                    "cooldown": {"in_cooldown": False},
-                },
-                # 5. Ineligible: Cold Lurker (daily_post_limit == 0)
-                {
-                    "id": "chan-tt-cold",
-                    "platform": "TikTok",
-                    "handle": "@tt_cold",
-                    "stage": "Cold Lurker",
-                    "status": "active",
-                    "posting_cadence": {"daily_post_limit": 0, "posts_today": 0},
-                    "cooldown": {"in_cooldown": False},
-                },
-                # 6. Ineligible: Platform not in campaign platforms
-                {
-                    "id": "chan-twitter-01",
-                    "platform": "Twitter",
-                    "handle": "@x_clips",
-                    "stage": "Mature",
-                    "status": "active",
-                    "posting_cadence": {"daily_post_limit": 5, "posts_today": 0},
-                    "cooldown": {"in_cooldown": False},
-                },
-            ],
-        }
-        with open(self.channels_path, "w", encoding="utf-8") as f:
-            json.dump(portfolio, f, indent=2)
-
-        cmd = [
-            sys.executable,
-            str(CLIPPING_STATE_CLI),
-            "get-step-config",
-            "--step",
-            "clipping-qc-packager",
-            "--dir",
-            str(self.project_dir),
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        self.assertEqual(res.returncode, 0)
-        config = json.loads(res.stdout)
-
-        # Check eligible channels list
-        eligible_ids = [c["id"] for c in config.get("eligible_channels", [])]
-        self.assertEqual(eligible_ids, ["chan-tt-ok"])
-
-        # Check ineligible channels list and reasons
-        self.assertIn("ineligible_channels", config)
-        ineligible_map = {c["id"]: c for c in config["ineligible_channels"]}
-
-        # chan-tt-cd1 must cite cooldown
-        self.assertIn("chan-tt-cd1", ineligible_map)
-        reason_cd1 = ineligible_map["chan-tt-cd1"].get("reason", "").lower()
-        self.assertTrue("cooldown" in reason_cd1 or "shadowban" in reason_cd1, f"Expected cooldown reason: {reason_cd1}")
-
-        # chan-ig-cd2 must cite cooldown
-        self.assertIn("chan-ig-cd2", ineligible_map)
-        reason_cd2 = ineligible_map["chan-ig-cd2"].get("reason", "").lower()
-        self.assertTrue("cooldown" in reason_cd2 or "suppression" in reason_cd2, f"Expected cooldown reason: {reason_cd2}")
-
-        # chan-yt-full must cite capacity / post limit
-        self.assertIn("chan-yt-full", ineligible_map)
-        reason_full = ineligible_map["chan-yt-full"].get("reason", "").lower()
-        self.assertTrue(
-            "capacity" in reason_full or "limit" in reason_full or "posts today" in reason_full,
-            f"Expected capacity reason: {reason_full}",
-        )
-
-        # chan-tt-cold must cite capacity / 0 posts limit
-        self.assertIn("chan-tt-cold", ineligible_map)
-        reason_cold = ineligible_map["chan-tt-cold"].get("reason", "").lower()
-        self.assertTrue(
-            "capacity" in reason_cold or "limit" in reason_cold or "cold lurker" in reason_cold,
-            f"Expected cold/capacity reason: {reason_cold}",
-        )
-
-        # chan-twitter-01 must cite platform mismatch
-        self.assertIn("chan-twitter-01", ineligible_map)
-        reason_plat = ineligible_map["chan-twitter-01"].get("reason", "").lower()
-        self.assertTrue(
-            "platform" in reason_plat or "mismatch" in reason_plat,
-            f"Expected platform reason: {reason_plat}",
-        )
-
-    def test_step7_slice_includes_device_transfer_configuration(self):
-        """Device transfer configuration from channels.json is passed into Step 7 slice."""
+    def test_step7_config_succeeds_without_channels_json(self):
+        """Step 7 get-step-config succeeds without channels.json existing."""
         brief_path = self._create_sample_brief(platforms=["TikTok"])
         self._ingest_brief(brief_path)
 
-        portfolio = {
-            "version": "1.0.0",
-            "workspace_id": "test-ws",
-            "default_device_transfer": {
-                "protocol": "qr_code",
-                "target": "http://192.168.1.50:8080",
-                "enabled": True,
-            },
-            "channels": [
-                {
-                    "id": "chan-tt-custom-transfer",
-                    "platform": "TikTok",
-                    "handle": "@tt_custom",
-                    "stage": "Mature",
-                    "status": "active",
-                    "posting_cadence": {"daily_post_limit": 4, "posts_today": 0},
-                    "cooldown": {"in_cooldown": False},
-                    "device_transfer": {
-                        "protocol": "adb_push",
-                        "target": "/sdcard/DCIM/Camera/",
-                        "enabled": True,
-                    },
-                }
-            ],
-        }
-        with open(self.channels_path, "w", encoding="utf-8") as f:
-            json.dump(portfolio, f, indent=2)
+        self.assertFalse(self.channels_path.is_file())
+        self.assertFalse((self.project_dir / "channels.json").is_file())
 
         cmd = [
             sys.executable,
@@ -466,23 +265,27 @@ class TestChannelsPipelineBridge(unittest.TestCase):
         res = subprocess.run(cmd, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0)
         config = json.loads(res.stdout)
+        self.assertNotIn("eligible_channels", config)
+        self.assertIn("target_loudness_lufs", config)
 
-        # Root level or dedicated transfer config present
-        self.assertTrue(
-            "device_transfer" in config or "default_device_transfer" in config,
-            "Step 7 slice must contain device transfer configuration from channels.json",
-        )
-        dt_config = config.get("device_transfer") or config.get("default_device_transfer")
-        self.assertIn("protocol", dt_config)
+    def test_ingest_brief_does_not_inject_channels_into_step7_state(self):
+        """cmd_ingest_brief does not inject channel slices into clipping-qc-packager Step Slice."""
+        brief_path = self._create_sample_brief()
+        self._ingest_brief(brief_path)
 
-        # Eligible channel must preserve its specific device_transfer config
-        eligible = config.get("eligible_channels", [])
-        self.assertEqual(len(eligible), 1)
-        self.assertIn("device_transfer", eligible[0])
-        self.assertEqual(eligible[0]["device_transfer"]["protocol"], "adb_push")
+        state_path = self.project_dir / ".clipping_state.json"
+        with open(state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
 
-    def test_skill_doc_describes_portfolio_bridge_and_step7_delivery(self):
-        """skills/clipping-pipeline/SKILL.md documents the portfolio bridge and Step 7 device delivery."""
+        qc_params = state["steps"]["clipping-qc-packager"]["params"]
+        self.assertNotIn("eligible_channels", qc_params)
+        self.assertNotIn("ineligible_channels", qc_params)
+        self.assertNotIn("device_transfer", qc_params)
+        self.assertNotIn("default_device_transfer", qc_params)
+
+
+    def test_skill_doc_describes_portfolio_bridge_and_device_delivery(self):
+        """skills/clipping-pipeline/SKILL.md documents the portfolio bridge and publishing device delivery."""
         skill_file = SKILLS_DIR / "SKILL.md"
         self.assertTrue(skill_file.is_file(), f"SKILL.md missing at {skill_file}")
         content = skill_file.read_text(encoding="utf-8")

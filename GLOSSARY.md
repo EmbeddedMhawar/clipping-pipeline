@@ -75,3 +75,54 @@ _Avoid_: Daily checklist, warmup routine, daily agenda
 **Device Transfer Protocol**:
 The configured mechanism (such as local QR code server, ADB push, Telegram dispatch, or cloud sync) used to deliver rendered clips directly to the creator's mobile device for manual posting.
 _Avoid_: File send, phone sync, video transfer
+
+**QC Packager**:
+The Step 7 skill (`clipping-qc-packager`) dedicated purely to audio/visual quality control (-14 LUFS loudness audit, caption closers check, metadata compliance) and Whop submission packaging.
+_Avoid_: QC manager, publishing manager, step 7 dispatcher
+
+**Publisher Skill**:
+The Step 8 skill (`clipping-publisher`) responsible for querying eligible channels, uploading directly to YouTube Shorts (via YouTube Data API v3 with BrowserOS Neo fallback), and transferring rendered clips to creator mobile devices for warmed-up Instagram and TikTok accounts.
+_Avoid_: Uploader bot, post sender, manual distributor
+
+**Warmed-Up Channel**:
+An account whose lifecycle stage allows active posting (`daily_post_limit > 0`—specifically `Seeding`, `Ramp-Up`, or `Mature`), and is not subject to an active `Account Cooldown`.
+_Avoid_: Seasoned account, ready channel, aged profile
+
+**Brand Cluster**:
+A group of channel accounts across different platforms (e.g. YouTube Shorts, TikTok, Instagram Reels) that share the same `account_name` and creator identity.
+_Avoid_: Channel family, account group, profile bundle
+
+**Cross-Platform Distribution**:
+Publishing a single approved video clip across different social platforms within the same brand cluster, while strictly prohibiting posting the identical clip to multiple channels on the same platform.
+_Avoid_: Multi-posting, duplicate broadcasting, spray-and-pray
+
+**Topic Segment**:
+A bounded segment of raw interview or podcast footage containing a coherent subject, story, or argument from which multiple distinct clip variations can be extracted.
+_Avoid_: Raw clip, video chunk, footage cut
+
+**Variation Profile**:
+A declarative style specification governing pacing, 0–3s hook formulation, framing logic, caption typography, and audio-visual treatment to transform a topic segment into a unique video edit.
+_Avoid_: Edit style, video preset, custom variation
+
+**Drama Cut**:
+A variation profile focused on emotional extremity, starting with the most vulnerable or shocking statement, aggressive reaction punch-ins, bold kinetic highlights, and subtle riser sound effects.
+_Avoid_: Shock cut, emotional edit, fast cut
+
+**Debate Bait Cut**:
+A variation profile engineered for high comment engagement (≥ 1%), opening with a provocative on-screen question card and rapid back-and-forth reaction cuts between speakers.
+_Avoid_: Argument cut, question video, debate clip
+
+**Narrative Cut**:
+A variation profile optimized for high completion rate and watch time, opening with an unresolved curiosity loop, conversational pacing, and contextual B-roll or screenshot overlays.
+_Avoid_: Story cut, documentary edit, long cut
+
+**Speaker Framing Anchor**:
+Smart-center vertical framing lock ensuring the active speaking subject is continuously centered in the 9:16 canvas unless deliberately replaced by contextual visual cutaways.
+_Avoid_: Face tracking crop, center crop, auto-reframe
+
+**Channel Profile Mapping**:
+The deterministic pairing between a Variation Profile and a specific channel in the Portfolio Registry based on channel niche and editorial persona.
+_Avoid_: Channel assignment, post binding, account targeting
+
+
+
