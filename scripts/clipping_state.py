@@ -11,10 +11,28 @@ import argparse
 import copy
 import json
 import os
+import shutil
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+# Ensure sibling scripts can be imported cleanly
+try:
+    from scripts import gui_companion, clipping_preferences
+except ImportError:
+    try:
+        import gui_companion
+        import clipping_preferences
+    except ImportError:
+        _scripts_dir = Path(__file__).resolve().parent
+        if str(_scripts_dir) not in sys.path:
+            sys.path.insert(0, str(_scripts_dir))
+        if str(_scripts_dir.parent) not in sys.path:
+            sys.path.insert(0, str(_scripts_dir.parent))
+        import gui_companion
+        import clipping_preferences
 
 STATE_FILENAME = ".clipping_state.json"
 CHANNELS_FILENAME = "channels.json"
@@ -112,6 +130,9 @@ def _save_state(state_path: Path, state: Dict[str, Any]) -> None:
 
 
 def _is_step_completed(step_data: Dict[str, Any]) -> bool:
+    cp = step_data.get("checkpoint", {})
+    if cp.get("staged") and not cp.get("reviewed"):
+        return False
     return (
         step_data.get("status") in ("completed", "approved")
         or step_data.get("approved") is True
@@ -437,6 +458,22 @@ def cmd_approve(args: argparse.Namespace) -> int:
         sys.stderr.write(f"Error: Unknown step '{step_name}'\n")
         return 1
 
+    # Checkpoint gate verification
+    step_data = state.get("steps", {}).get(step_name, {})
+    checkpoint = step_data.get("checkpoint")
+    if checkpoint and checkpoint.get("staged", False):
+        if not checkpoint.get("reviewed", False) and not getattr(args, "force", False):
+            sys.stderr.write(
+                f"Checkpoint Gate Blocked: Step '{step_name}' has an unresolved feedback checkpoint pending review. "
+                f"Review artifact: {checkpoint.get('review_artifact', 'N/A')}. "
+                f"Register feedback via 'checkpoint --step {step_name} --feedback \"...\"' or pass --force.\n"
+            )
+            return 2
+        elif not checkpoint.get("reviewed", False) and getattr(args, "force", False):
+            sys.stdout.write(
+                f"[WARNING] Checkpoint gate bypassed with --force for step '{step_name}'.\n"
+            )
+
     if step_name == "clipping-publisher":
         step_params = state.get("steps", {}).get(step_name, {}).get("params", {})
         pub_manifest = step_params.get("publication_manifest")
@@ -470,6 +507,17 @@ def cmd_approve(args: argparse.Namespace) -> int:
     state["steps"][step_name]["status"] = "completed"
     state["steps"][step_name]["approved"] = True
     state["steps"][step_name]["completed_at"] = now
+
+    if checkpoint:
+        checkpoint["reviewed"] = True
+        checkpoint["cleared"] = True
+        checkpoint["approved"] = True
+        checkpoint["approved_at"] = now
+        if state.get("checkpoint", {}).get("step") == step_name:
+            state["checkpoint"]["reviewed"] = True
+            state["checkpoint"]["cleared"] = True
+            state["checkpoint"]["approved"] = True
+            state["checkpoint"]["approved_at"] = now
 
     if step_name == "clipping-guidelines":
         state["guidelines_approved"] = True
@@ -547,6 +595,15 @@ def cmd_validate(args: argparse.Namespace) -> int:
     prereq_step, prereq_msg = PREFLIGHT_PREREQUISITES.get(step_name, (None, ""))
     if prereq_step:
         prereq_data = steps_state.get(prereq_step, {})
+        prereq_cp = prereq_data.get("checkpoint", {})
+        if prereq_cp.get("staged", False) and not prereq_cp.get("reviewed", False):
+            msg = f"Pre-flight Gate Blocked: Prerequisite step '{prereq_step}' has an active feedback checkpoint pending review."
+            if args.force:
+                sys.stdout.write(f"[WARNING] Pre-flight gate bypassed with --force: {msg}\n")
+                return 0
+            sys.stderr.write(f"{msg}\n")
+            return 2
+
         if not _is_step_completed(prereq_data):
             msg = f"Pre-flight Gate Blocked: {prereq_msg}"
             if args.force:
@@ -556,6 +613,409 @@ def cmd_validate(args: argparse.Namespace) -> int:
             return 2
 
     print(f"Pre-flight Gate Passed: Step '{step_name}' is cleared to execute.")
+    return 0
+
+
+def _generate_review_artifact(
+    artifact_path: Path,
+    step_name: str,
+    state: Dict[str, Any],
+    companion_status: Dict[str, Any],
+    project_file: Optional[Path],
+    diff_results: Dict[str, Any],
+    feedback: str,
+    directives: List[Dict[str, Any]],
+    reviewed: bool,
+    timestamp: str,
+) -> None:
+    campaign = state.get("campaign", {})
+    title = campaign.get("title", "Untitled Campaign")
+    project = campaign.get("project", "default")
+    step_params = state.get("steps", {}).get(step_name, {}).get("params", {})
+
+    status_str = "REVIEWED / CLEARED" if reviewed else "PENDING HUMAN REVIEW (GATE PAUSED)"
+    companion_str = (
+        f"Active on port {companion_status.get('port')} (playhead {companion_status.get('playhead_seconds', 0.0):.2f}s)"
+        if companion_status.get("active")
+        else "Disconnected / Offline"
+    )
+
+    lines = [
+        "---",
+        "RequestFeedback: true",
+        f"Summary: Checkpoint review for step '{step_name}' in project '{project}'",
+        "UserFacing: true",
+        "---",
+        "",
+        f"# Checkpoint Review: `{step_name}`",
+        "",
+        "> [!IMPORTANT]",
+        f"> **Feedback Checkpoint State**: {status_str}",
+        f"> Staged at `{timestamp}`. Downstream step execution and approval are gated until human feedback is registered.",
+        "",
+        "## Summary Metrics",
+        f"- **Pipeline Step**: `{step_name}`",
+        f"- **Campaign / Project**: `{title}` (`{project}`)",
+        f"- **Review Status**: `{status_str}`",
+        f"- **GUI Companion**: {companion_str}",
+        f"- **Project File**: `{project_file.name if project_file else 'N/A'}`",
+        "",
+        "## Active Step Parameters Slice",
+        "```json",
+        json.dumps(step_params, indent=2, ensure_ascii=False),
+        "```",
+        "",
+        "## Codified Directives & Preferences",
+    ]
+
+    if feedback:
+        lines.append(f"- **Chat Feedback**: \"{feedback}\"")
+    else:
+        lines.append("- **Chat Feedback**: *(None provided yet)*")
+
+    if directives:
+        lines.append("- **Parsed Directives**:")
+        for d in directives:
+            lines.append(f"  - `{d.get('directive')}`: {d.get('explanation')}")
+
+    diffs = diff_results.get("differences", [])
+    if diffs:
+        lines.append(f"- **Detected Manual Timeline Edits ({len(diffs)})**:")
+        for df in diffs:
+            lines.append(f"  - **{df.get('category')}**: {df.get('description')}")
+    else:
+        lines.append("- **Manual Edits**: *(No unsaved GUI diffs detected)*")
+
+    lines.extend([
+        "",
+        "## Operator Action Guidance",
+        "1. **Inspect Timeline in FilmCraft**:",
+        "   ```bash",
+        "   python3 scripts/gui_companion.py seek --seconds 0.0",
+        "   python3 scripts/gui_companion.py play",
+        "   ```",
+        "2. **Register Chat Directives / Feedback**:",
+        "   ```bash",
+        f"   python3 scripts/clipping_state.py checkpoint --step {step_name} --feedback \"<your instructions>\"",
+        "   ```",
+        "3. **Approve Step & Unblock Pipeline**:",
+        "   ```bash",
+        f"   python3 scripts/clipping_state.py approve --step {step_name}",
+        "   ```",
+        "",
+    ])
+
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(artifact_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
+def cmd_checkpoint(args: argparse.Namespace) -> int:
+    state_path = _get_state_path(args.dir)
+    state = _load_state(state_path)
+    project_dir = state_path.parent
+
+    step_name = args.step
+    if step_name not in PIPELINE_STEPS:
+        sys.stderr.write(f"Error: Unknown step '{step_name}'\n")
+        return 1
+
+    steps_state = state.setdefault("steps", {})
+    step_data = steps_state.setdefault(
+        step_name,
+        {
+            "status": "pending",
+            "approved": False,
+            "completed_at": None,
+            "params": {},
+        },
+    )
+
+    # a) Pre-flight check: validates that the step has finished its execution data
+    # (status == 'completed' or staged data ready)
+    is_completed_or_staged = (
+        step_data.get("status")
+        in (
+            "completed",
+            "staged",
+            "awaiting_approval",
+            "awaiting_checkpoint",
+            "checkpoint_reviewed",
+            "approved",
+        )
+        or step_data.get("staged") is True
+        or step_data.get("completed_at") is not None
+        or (step_data.get("checkpoint", {}).get("staged") is True)
+    )
+
+    existing_fcproj = list(project_dir.glob("*.fcproj"))
+    has_execution_data = is_completed_or_staged or bool(existing_fcproj)
+
+    if not has_execution_data and not getattr(args, "force", False):
+        sys.stderr.write(
+            f"Pre-flight Gate Blocked: Step '{step_name}' has not finished execution data "
+            f"(status is '{step_data.get('status')}'). Complete step execution or pass --force.\n"
+        )
+        return 2
+
+    now = _get_utc_now_iso()
+
+    # Resolve project files for companion & diffing
+    project_file: Optional[Path] = None
+    if getattr(args, "project_file", None):
+        pf = Path(args.project_file)
+        if pf.is_file():
+            project_file = pf
+    if not project_file:
+        proj_name = state.get("campaign", {}).get("project")
+        if proj_name:
+            cand = project_dir / f"{proj_name}.fcproj"
+            if cand.is_file():
+                project_file = cand
+        if not project_file:
+            candidates = [
+                p
+                for p in project_dir.glob("*.fcproj")
+                if not p.name.startswith("baseline_") and p.name != "baseline.fcproj"
+            ]
+            if candidates:
+                project_file = candidates[0]
+            elif existing_fcproj:
+                project_file = existing_fcproj[0]
+
+    # Resolve or initialize baseline file
+    baseline_file: Optional[Path] = None
+    if getattr(args, "baseline_file", None):
+        bf = Path(args.baseline_file)
+        if bf.is_file():
+            baseline_file = bf
+    if not baseline_file and project_file:
+        cand_base = project_dir / f"baseline_{project_file.name}"
+        if cand_base.is_file():
+            baseline_file = cand_base
+        elif (project_dir / "baseline.fcproj").is_file():
+            baseline_file = project_dir / "baseline.fcproj"
+        else:
+            baseline_file = cand_base
+            try:
+                shutil.copy2(project_file, baseline_file)
+            except Exception:
+                pass
+
+    # b) Companion sync: queries scripts/gui_companion.py status.
+    # If GUI companion is active and project exists, triggers gui_companion.py reload
+    # to refresh the timeline in FilmCraft, and starts/checks project file watcher.
+    companion_status: Dict[str, Any] = {"active": False, "connected": False}
+    try:
+        health = gui_companion.check_health(base_dir=project_dir, timeout=1.0)
+        if health.get("connected"):
+            companion_status = {
+                "active": True,
+                "connected": True,
+                "port": health.get("port"),
+                "pid": health.get("pid"),
+                "project_name": health.get("project_name"),
+                "playhead_seconds": health.get("playhead_seconds"),
+                "playhead_timecode": health.get("playhead_timecode"),
+                "dirty": health.get("dirty"),
+                "revision": health.get("revision"),
+            }
+            if project_file and project_file.is_file():
+                try:
+                    rel_res = gui_companion.reload_timeline(
+                        project_path=str(project_file),
+                        port=health.get("port"),
+                        base_dir=project_dir,
+                    )
+                    companion_status["reloaded"] = True
+                    companion_status["reload_action"] = rel_res.get("action")
+                except Exception as ex:
+                    companion_status["reload_error"] = str(ex)
+
+            # Start/check project file watcher
+            if project_file and project_file.is_file():
+                watcher_flag = project_dir / gui_companion.DEFAULT_FLAG_FILENAME
+                companion_status["watcher_flag_path"] = str(watcher_flag)
+                companion_status["watcher_armed"] = True
+    except Exception as e:
+        companion_status["error"] = str(e)
+
+    # c) Save detection / diffing: if the operator saved manual changes in FilmCraft
+    # (detected via .gui_companion_saved.flag or mtime diff), automatically runs
+    # scripts/clipping_preferences.py diff-project against the agent baseline and saves learned preferences.
+    flag_file = project_dir / gui_companion.DEFAULT_FLAG_FILENAME
+    flag_detected = flag_file.is_file()
+    mtime_diff_detected = False
+    prev_baseline_mtime = step_data.get("checkpoint", {}).get("baseline_mtime")
+
+    if (
+        project_file
+        and project_file.is_file()
+        and baseline_file
+        and baseline_file.is_file()
+    ):
+        p_mtime = project_file.stat().st_mtime
+        b_mtime = baseline_file.stat().st_mtime
+        if p_mtime > b_mtime or (
+            prev_baseline_mtime and p_mtime > prev_baseline_mtime
+        ):
+            mtime_diff_detected = True
+
+    diff_triggered = (
+        flag_detected or mtime_diff_detected or getattr(args, "diff_project", False)
+    )
+    diff_results: Dict[str, Any] = {}
+    preferences_from_diff: Dict[str, Any] = {}
+
+    if (
+        diff_triggered
+        and project_file
+        and baseline_file
+        and baseline_file.is_file()
+        and project_file.is_file()
+    ):
+        try:
+            diff_results = clipping_preferences.diff_project_heuristic(
+                baseline_file, project_file
+            )
+            codified = diff_results.get("codified_preferences", {})
+            preferences_from_diff = codified
+            if codified:
+                pref_store = clipping_preferences.PreferenceStore(
+                    project_dir=project_dir
+                )
+                for k, v in clipping_preferences.flatten_dict(codified).items():
+                    pref_store.set(k, v, scope="project")
+                print(
+                    f"[Checkpoint Diff] Codified {len(diff_results.get('differences', []))} preferences from FilmCraft edit into .clipping_preferences.json"
+                )
+            if flag_file.is_file():
+                flag_file.unlink(missing_ok=True)
+        except Exception as ex:
+            diff_results["error"] = str(ex)
+
+    # d) Chat feedback parsing: if --feedback "<text>" is passed, runs
+    # scripts/clipping_preferences.py parse-feedback to codify directives.
+    directives: List[Dict[str, Any]] = []
+    preferences_from_chat: Dict[str, Any] = {}
+    if args.feedback:
+        try:
+            directives, proposed = clipping_preferences.parse_feedback_directives(
+                args.feedback
+            )
+            preferences_from_chat = proposed
+            if proposed:
+                pref_store = clipping_preferences.PreferenceStore(
+                    project_dir=project_dir
+                )
+                for k, v in clipping_preferences.flatten_dict(proposed).items():
+                    pref_store.set(k, v, scope="project")
+                print(
+                    f"[Checkpoint Feedback] Codified {len(directives)} directives into .clipping_preferences.json: '{args.feedback}'"
+                )
+        except Exception as ex:
+            preferences_from_chat["error"] = str(ex)
+
+    # Determine reviewed status:
+    # If feedback was given, or auto_approve is set, or previously reviewed:
+    is_reviewed = (
+        bool(args.feedback)
+        or bool(args.auto_approve)
+        or (
+            step_data.get("checkpoint", {}).get("reviewed", False)
+            and not getattr(args, "diff_project", False)
+        )
+    )
+
+    # g) Review artifact generation: renders markdown checkpoint review artifact
+    # with summary metrics and RequestFeedback: true metadata.
+    artifact_path = project_dir / f"checkpoint_{step_name}.md"
+    _generate_review_artifact(
+        artifact_path=artifact_path,
+        step_name=step_name,
+        state=state,
+        companion_status=companion_status,
+        project_file=project_file,
+        diff_results=diff_results,
+        feedback=args.feedback
+        or step_data.get("checkpoint", {}).get("feedback", ""),
+        directives=directives,
+        reviewed=is_reviewed,
+        timestamp=now,
+    )
+
+    # e) State tracking: records checkpoint status in .clipping_state.json:
+    # "checkpoint": { "staged": true, "reviewed": false, "review_artifact": "...", "feedback": "...", "timestamp": "..." }
+    checkpoint_record: Dict[str, Any] = {
+        "staged": True,
+        "reviewed": is_reviewed,
+        "review_artifact": str(artifact_path),
+        "feedback": args.feedback
+        or step_data.get("checkpoint", {}).get("feedback", ""),
+        "timestamp": now,
+        "step": step_name,
+        "preferences_updated": bool(preferences_from_diff or preferences_from_chat),
+        "diff_detected": bool(diff_results.get("differences")),
+        "companion_active": companion_status.get("active", False),
+    }
+    if project_file and project_file.is_file():
+        checkpoint_record["project_file"] = str(project_file)
+        checkpoint_record["baseline_mtime"] = project_file.stat().st_mtime
+    if baseline_file and baseline_file.is_file():
+        checkpoint_record["baseline_file"] = str(baseline_file)
+
+    step_data["checkpoint"] = checkpoint_record
+    state["checkpoint"] = checkpoint_record
+
+    if not is_reviewed:
+        step_data["status"] = "awaiting_checkpoint"
+    else:
+        step_data["status"] = "checkpoint_reviewed"
+
+    # Auto-approve if requested
+    if args.auto_approve:
+        step_data["status"] = "completed"
+        step_data["approved"] = True
+        step_data["completed_at"] = now
+        checkpoint_record["cleared"] = True
+        checkpoint_record["approved"] = True
+        checkpoint_record["approved_at"] = now
+        if step_name == "clipping-guidelines":
+            state["guidelines_approved"] = True
+        current_idx = PIPELINE_STEPS.index(step_name)
+        if current_idx + 1 < len(PIPELINE_STEPS):
+            state["current_step"] = PIPELINE_STEPS[current_idx + 1]
+
+    _save_state(state_path, state)
+
+    if args.json:
+        print(json.dumps(checkpoint_record, indent=2))
+        return 0
+
+    print("=" * 80)
+    print(f"CHECKPOINT STATE GATE: {step_name}")
+    print("=" * 80)
+    print(
+        f"Status:          {'[REVIEWED]' if is_reviewed else '[AWAITING HUMAN REVIEW - GATE PAUSED]'}"
+    )
+    print(f"Review Artifact: {artifact_path}")
+    print(f"Feedback:        {checkpoint_record['feedback'] or '(None)'}")
+    print(
+        f"Companion Sync:  {'Connected (port ' + str(companion_status.get('port')) + ')' if companion_status.get('active') else 'Disconnected'}"
+    )
+    if diff_results.get("differences"):
+        print(
+            f"Project Diffs:   {len(diff_results['differences'])} edits codified into preferences"
+        )
+    if directives:
+        print(
+            f"Chat Directives: {len(directives)} directives parsed into preferences"
+        )
+    if args.auto_approve:
+        print(
+            f"Auto-Approve:    Step '{step_name}' approved. Next step: {state.get('current_step')}"
+        )
+    print("=" * 80)
     return 0
 
 
@@ -609,6 +1069,12 @@ def cmd_status(args: argparse.Namespace) -> int:
         print("Portfolio:    [NOTICE] channels.json not found (run 'python3 scripts/clipping_channels.py init')")
     print(f"Current Step: {current_step}")
     print(f"Next Step:    {next_step or 'None (All steps completed)'}")
+    checkpoint_info = state.get("checkpoint")
+    if checkpoint_info:
+        cp_step = checkpoint_info.get("step", "active")
+        cp_rev = checkpoint_info.get("reviewed", False)
+        cp_art = checkpoint_info.get("review_artifact", "N/A")
+        print(f"Checkpoint:   {'[REVIEWED]' if cp_rev else '[AWAITING REVIEW - PAUSED]'} ({cp_step}) -> {cp_art}")
     print("-" * 80)
     print(f"{'STEP':<26} {'STATUS':<20} {'APPROVED':<10} {'COMPLETED AT':<20}")
     print("-" * 80)
@@ -662,6 +1128,57 @@ def main() -> None:
         help="Force approve step bypassing validation checks",
     )
 
+    # checkpoint
+    p_checkpoint = subparsers.add_parser(
+        "checkpoint",
+        help="Interactive checkpoint state gate with GUI companion sync and preference codification",
+    )
+    p_checkpoint.add_argument(
+        "--step",
+        required=True,
+        help="Step name to stage/review checkpoint for (e.g. clipping-assembly)",
+    )
+    p_checkpoint.add_argument(
+        "--dir",
+        default=None,
+        help="Target project directory",
+    )
+    p_checkpoint.add_argument(
+        "--feedback",
+        default=None,
+        help="Natural language operator feedback / directives to parse and codify",
+    )
+    p_checkpoint.add_argument(
+        "--diff-project",
+        action="store_true",
+        help="Force differential analysis between baseline and user .fcproj",
+    )
+    p_checkpoint.add_argument(
+        "--auto-approve",
+        action="store_true",
+        help="Automatically approve the step once checkpoint is staged/reviewed",
+    )
+    p_checkpoint.add_argument(
+        "--project-file",
+        default=None,
+        help="Path to user/active .fcproj file (optional)",
+    )
+    p_checkpoint.add_argument(
+        "--baseline-file",
+        default=None,
+        help="Path to baseline .fcproj file (optional)",
+    )
+    p_checkpoint.add_argument(
+        "--force",
+        action="store_true",
+        help="Bypass execution pre-flight checks if step data is not yet finished",
+    )
+    p_checkpoint.add_argument(
+        "--json",
+        action="store_true",
+        help="Output JSON response",
+    )
+
     # get-step-config
     p_get = subparsers.add_parser("get-step-config", help="Get step configuration slice")
     p_get.add_argument("--step", required=True, help="Step name to retrieve params for")
@@ -696,6 +1213,7 @@ def main() -> None:
         "init": cmd_init,
         "ingest-brief": cmd_ingest_brief,
         "approve": cmd_approve,
+        "checkpoint": cmd_checkpoint,
         "get-step-config": cmd_get_step_config,
         "validate": cmd_validate,
         "status": cmd_status,
