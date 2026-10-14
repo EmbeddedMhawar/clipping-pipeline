@@ -91,6 +91,7 @@ class TestPluginManifest(unittest.TestCase):
             "clipping-pipeline",
             "clipping-guidelines",
             "clipping-channels",
+            "clipping-assembly",
             "clipping-publisher",
         ]
         for skill in expected_skills:
