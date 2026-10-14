@@ -124,5 +124,22 @@ _Avoid_: Face tracking crop, center crop, auto-reframe
 The deterministic pairing between a Variation Profile and a specific channel in the Portfolio Registry based on channel niche and editorial persona.
 _Avoid_: Channel assignment, post binding, account targeting
 
+**Live GUI Companion**:
+A persistent background desktop process of FilmCraft (`filmcraft --control <port>`) or EffectCraft running alongside the agent during pipeline execution, providing real-time visual playback and timeline inspection.
+_Avoid_: External editor, desktop viewer, GUI watcher
 
+**Feedback Checkpoint**:
+A dedicated interactive pause state in the state engine (`clipping_state.py`) where downstream step approval is blocked until the operator inspects the live timeline in the GUI companion and provides directives or confirms approval.
+_Avoid_: Step pause, review gate, user wait
 
+**Bi-directional Preference Codification**:
+The automated extraction and persistent storage of human editorial preferences derived both from interactive chat directives and from diffing manual timeline modifications against agent-generated baselines.
+_Avoid_: Feedback recording, preference saving, preference capture
+
+**Project Diffing Heuristic**:
+The differential analysis of `.fcproj` and `.ecproj` project files comparing user-edited project files against agent-generated project baselines to detect and encode editorial preferences.
+_Avoid_: Project comparison, file diffing, timeline diff
+
+**Preference Store**:
+The 3-tier hierarchical JSON configuration storage (`.clipping_preferences.json` project-level, `campaign_brief.json` campaign-level, and `~/.config/clipping-pipeline/preferences.json` user-level) governing editing parameters across pipeline runs.
+_Avoid_: Settings file, preference cache, config store
