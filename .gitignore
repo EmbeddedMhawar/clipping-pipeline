@@ -5,3 +5,11 @@ __pycache__/
 .coverage
 htmlcov/
 .clipping_state.json
+
+# Temporary model binaries and experimental weights
+*.task
+*.tflite
+
+# Temporary profile image transfer files
+/basketball_card_pfp.*
+

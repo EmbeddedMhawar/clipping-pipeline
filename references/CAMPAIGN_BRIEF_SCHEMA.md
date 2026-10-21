@@ -2,7 +2,13 @@
 
 > **File**: `references/CAMPAIGN_BRIEF_SCHEMA.md`  
 > **Source**: Antigravity Short-Form Clipping Pipeline Plugin  
-> **Compliance**: Cole Corcoran AI Clipping Framework & Paid Campaign Rules
+> **Compliance**: Cole Corcoran AI Clipping Framework & Paid Campaign Rules  
+> **Related ADRs**:
+> - [ADR 0001: Project-Local JSON State File](../docs/adr/0001-project-local-json-state-file.md)
+> - [ADR 0002: Pre-Digested Step Configuration Slices](../docs/adr/0002-pre-digested-step-slices.md)
+> - [ADR 0006: BrowserOS Neo Web Brief Ingestion](../docs/adr/0006-browseros-neo-web-brief-ingestion.md)
+> - [ADR 0010: Dedicated Pipeline Publishing Step](../docs/adr/0010-dedicated-pipeline-publishing-step.md)
+> - [ADR 0011: Hardware-Accelerated Video Proxy Generation & Source Download Bridge](../docs/adr/0011-hardware-accelerated-proxy-generation.md)
 
 This document defines the authoritative data contract for normalized campaign briefs (`campaign_brief.json`). All raw briefs ingested from markdown files, user prompt text, Notion pages, or URLs must be parsed or defaulted to conform to this specification before being ingested into `.clipping_state.json`.
 
@@ -35,6 +41,7 @@ This document defines the authoritative data contract for normalized campaign br
 - `url` (`string`): YouTube/VOD URL, e.g. `"https://www.youtube.com/watch?v=GfVYVEPSLIM"`.
 - `channel` (`string`): Host/channel handle, e.g. `"@mpj"`.
 - `duration` (`string`): Raw footage duration, e.g. `"1:36:59"`.
+- `proxy_path` (`string`, optional): Relative path to hardware-accelerated proxy (e.g. `"raw/Proxies/n3on-x-mpj_Proxy.mp4"`) generated per [ADR 0011](../docs/adr/0011-hardware-accelerated-proxy-generation.md).
 
 #### `economics` Sub-fields:
 - `rate_per_1k_views` (`number`): USD payout per 1,000 verified views, e.g. `1.0`.
@@ -121,7 +128,8 @@ The following JSON Schema validates any `campaign_brief.json`:
           "properties": {
             "url": { "type": "string" },
             "channel": { "type": "string" },
-            "duration": { "type": "string" }
+            "duration": { "type": "string" },
+            "proxy_path": { "type": "string" }
           }
         },
         "economics": {
