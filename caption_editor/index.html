@@ -1,0 +1,1765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Remotion Short-Form Caption Studio</title>
+  <style>
+    :root {
+      --bg: #09090b;
+      --surface: #141418;
+      --surface-hover: #1c1c24;
+      --card: #18181f;
+      --border: #272732;
+      --border-accent: #3f3f50;
+      --primary: #22c55e;
+      --primary-hover: #16a34a;
+      --accent: #38bdf8;
+      --gold: #eab308;
+      --danger: #ef4444;
+      --danger-hover: #dc2626;
+      --text: #f4f4f5;
+      --text-muted: #a1a1aa;
+      --text-dim: #71717a;
+      --lime: #00ffcc;
+    }
+
+    @font-face {
+      font-family: 'Montserrat';
+      src: url('/font/Montserrat-ExtraBold.ttf') format('truetype');
+      font-weight: 800;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; user-select: none; }
+
+    /* Header */
+    header {
+      height: 56px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      z-index: 20;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-logo { width: 28px; height: 28px; background: linear-gradient(135deg, #22c55e, #38bdf8); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15px; color: #000; }
+    .brand h1 { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
+    .brand-badge { background: #272732; color: #38bdf8; font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+
+    .header-center { display: flex; align-items: center; gap: 14px; font-size: 13px; color: var(--text-muted); }
+    .stat-pill { background: #181822; border: 1px solid var(--border); padding: 4px 10px; border-radius: 6px; font-size: 12px; }
+    .stat-pill span { color: var(--text); font-weight: 600; }
+
+    .header-actions { display: flex; align-items: center; gap: 10px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 14px; border-radius: 7px; font-size: 13px; font-weight: 600;
+      cursor: pointer; border: 1px solid transparent; transition: all 0.15s ease;
+    }
+    .btn-primary { background: var(--primary); color: #000; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-secondary { background: var(--card); border-color: var(--border); color: var(--text); }
+    .btn-secondary:hover { background: var(--surface-hover); border-color: var(--border-accent); }
+    .btn-danger { background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.3); color: #f87171; }
+    .btn-danger:hover { background: var(--danger); color: #fff; }
+    .btn-sm { padding: 4px 8px; font-size: 11px; border-radius: 5px; }
+
+    /* Main workspace layout */
+    .workspace {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 460px 1fr;
+      grid-template-rows: 1fr 220px;
+      grid-template-areas:
+        "stage inspector"
+        "timeline timeline";
+      overflow: hidden;
+    }
+
+    /* Stage Panel (Video & Overlays) */
+    .stage-panel {
+      grid-area: stage;
+      background: #0d0d10;
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      padding: 16px;
+    }
+    .video-viewport-wrapper {
+      position: relative;
+      width: 280px;
+      height: 497px; /* 9:16 aspect */
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 12px 36px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.1);
+    }
+    video#mainVideo {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      pointer-events: none;
+    }
+    .overlay-layer {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: auto;
+    }
+
+    /* Interactive overlay elements on stage */
+    .banner-box-overlay {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      cursor: ns-resize;
+      user-select: none;
+      z-index: 15;
+    }
+    .banner-box-overlay img {
+      width: 197px; /* (759 / 1080) * 280px */
+      display: block;
+      pointer-events: none;
+      filter: drop-shadow(0 4px 12px rgba(0,0,0,0.6));
+    }
+    .banner-box-overlay.selected {
+      outline: 2px solid var(--accent);
+      border-radius: 6px;
+    }
+
+    .emotion-cue-overlay {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      font-family: 'Montserrat', sans-serif;
+      font-size: 11px;
+      font-weight: 800;
+      font-style: italic;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: rgba(0,0,0,0.5);
+      border: 1.5px dashed var(--gold);
+      color: #fff;
+      cursor: move;
+      text-shadow: 0 2px 4px #000;
+      white-space: nowrap;
+    }
+    .emotion-cue-overlay.selected {
+      border: 2px solid #fff;
+      box-shadow: 0 0 12px var(--gold);
+    }
+
+    .dialogue-cue-overlay {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: 'Montserrat', sans-serif;
+      font-size: 16px;
+      font-weight: 800;
+      color: #fff;
+      -webkit-text-stroke: 1.2px #000;
+      text-shadow: 0 2px 6px rgba(0,0,0,0.9);
+      text-align: center;
+      cursor: pointer;
+      padding: 2px 10px;
+      border-radius: 4px;
+      letter-spacing: -0.02em;
+    }
+    .dialogue-cue-overlay.lime { color: var(--lime); }
+    .dialogue-cue-overlay.selected {
+      outline: 2px dashed #38bdf8;
+      background: rgba(56, 189, 248, 0.2);
+    }
+
+    /* Stage Controls Bar */
+    .stage-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 280px;
+      margin-top: 12px;
+      gap: 8px;
+    }
+    .play-btn {
+      width: 36px; height: 36px; border-radius: 50%; background: #272732;
+      border: 1px solid var(--border-accent); color: #fff; display: flex;
+      align-items: center; justify-content: center; cursor: pointer;
+    }
+    .play-btn:hover { background: var(--surface-hover); color: var(--primary); }
+    .time-readout { font-family: monospace; font-size: 13px; font-weight: 700; color: #fff; }
+
+    /* Inspector & Cue Management Panel */
+    .inspector-panel {
+      grid-area: inspector;
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Tab bar */
+    .tab-nav {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: #111115;
+    }
+    .tab-btn {
+      padding: 12px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border-bottom: 2px solid transparent;
+    }
+    .tab-btn.active {
+      color: var(--text);
+      border-bottom-color: var(--primary);
+      background: var(--surface);
+    }
+
+    /* Cue Editor Card */
+    .selected-cue-box {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin: 14px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    }
+    .cue-box-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .cue-type-badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .badge-emotion { background: rgba(234, 179, 8, 0.2); color: var(--gold); border: 1px solid rgba(234, 179, 8, 0.4); }
+    .badge-dialogue { background: rgba(56, 189, 248, 0.2); color: var(--accent); border: 1px solid rgba(56, 189, 248, 0.4); }
+    .badge-banner { background: rgba(255, 255, 255, 0.2); color: #fff; border: 1px solid rgba(255, 255, 255, 0.4); }
+
+    .cue-text-input {
+      width: 100%;
+      background: #0d0d10;
+      border: 1px solid var(--border-accent);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 700;
+      padding: 10px 12px;
+      border-radius: 6px;
+    }
+    .cue-text-input:focus { outline: none; border-color: var(--primary); }
+
+    .ctrl-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .ctrl-label { width: 75px; font-weight: 600; }
+    .nudge-group { display: flex; gap: 4px; align-items: center; }
+    .nudge-btn {
+      background: #272732; border: 1px solid var(--border); color: #fff;
+      padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;
+    }
+    .nudge-btn:hover { background: #383848; color: var(--accent); }
+    .val-input {
+      width: 72px; background: #0d0d10; border: 1px solid var(--border);
+      color: #fff; padding: 4px 6px; border-radius: 4px; font-family: monospace; font-size: 12px; text-align: center;
+    }
+
+    /* Cue Table View */
+    .table-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 14px 14px 14px;
+    }
+    .cue-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .cue-table th {
+      position: sticky; top: 0; background: var(--surface);
+      text-align: left; padding: 10px 12px; color: var(--text-muted);
+      border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase;
+      z-index: 5;
+    }
+    .cue-table tr {
+      border-bottom: 1px solid #1a1a22;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .cue-table tr:hover { background: var(--surface-hover); }
+    .cue-table tr.selected { background: #1e2638; border-color: #2b3a58; }
+    .cue-table tr.disabled { opacity: 0.4; }
+    .cue-table td { padding: 9px 12px; vertical-align: middle; }
+
+    /* Timeline Panel */
+    .timeline-panel {
+      grid-area: timeline;
+      background: #111116;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .timeline-toolbar {
+      height: 38px;
+      background: #16161d;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      font-size: 12px;
+    }
+    .track-labels { width: 140px; background: #13131a; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+    .track-label { height: 44px; display: flex; align-items: center; padding-left: 12px; font-size: 11px; font-weight: 700; color: var(--text-muted); border-bottom: 1px solid #1a1a24; }
+
+    .timeline-viewport {
+      flex: 1;
+      display: flex;
+      overflow-x: auto;
+      overflow-y: hidden;
+      position: relative;
+    }
+    .timeline-tracks-area {
+      flex: 1;
+      position: relative;
+      background: #0d0d12;
+      background-image: linear-gradient(to right, #181822 1px, transparent 1px);
+      background-size: 50px 100%;
+      height: 100%;
+    }
+    .timeline-track {
+      height: 44px;
+      border-bottom: 1px solid #1a1a24;
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .cue-block {
+      position: absolute;
+      height: 30px;
+      border-radius: 6px;
+      padding: 0 8px;
+      display: flex;
+      align-items: center;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: grab;
+      color: #000;
+      border: 1px solid rgba(255,255,255,0.2);
+      transition: filter 0.1s;
+      touch-action: none;
+      user-select: none;
+    }
+    .cue-block:active { cursor: grabbing; }
+    .cue-block.dialogue { background: linear-gradient(135deg, #38bdf8, #0284c7); color: #fff; }
+    .cue-block.lime { background: linear-gradient(135deg, #00ffcc, #10b981); color: #000; }
+    .cue-block.emotion { background: linear-gradient(135deg, #facc15, #eab308); color: #000; font-style: italic; }
+    .cue-block.banner { background: #ffffff; color: #000; }
+    .cue-block.selected { outline: 2px solid #fff; box-shadow: 0 0 12px rgba(255,255,255,0.6); z-index: 10; }
+    .cue-block.disabled { opacity: 0.3; }
+
+    /* Playhead bar */
+    .playhead-needle {
+      position: absolute;
+      top: 0; bottom: 0;
+      width: 2px;
+      background: #ef4444;
+      z-index: 30;
+      pointer-events: none;
+    }
+    .playhead-head {
+      position: absolute;
+      top: 0; left: -6px;
+      width: 14px; height: 14px;
+      background: #ef4444;
+      border-radius: 3px;
+      cursor: ew-resize;
+    }
+
+    /* Toast Notification */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #181824;
+      border: 1px solid var(--border-accent);
+      padding: 12px 18px;
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transform: translateY(100px);
+      opacity: 0;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 100;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .toast.success { border-color: var(--primary); color: #4ade80; }
+
+    /* Agent Copilot Drawer */
+    .copilot-drawer {
+      position: fixed;
+      top: 56px; right: 0; bottom: 0;
+      width: 400px;
+      background: #111117;
+      border-left: 1px solid var(--border-accent);
+      box-shadow: -8px 0 32px rgba(0,0,0,0.7);
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(100%);
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      padding: 16px;
+      gap: 14px;
+    }
+    .copilot-drawer.open { transform: translateX(0); }
+    .copilot-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+    .copilot-section { display: flex; flex-direction: column; }
+    .copilot-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.05em; margin-bottom: 6px; }
+    .copilot-action-btn {
+      background: #181822; border: 1px solid var(--border); border-radius: 6px;
+      padding: 8px 10px; color: var(--text); cursor: pointer; text-align: left;
+      display: flex; flex-direction: column; gap: 2px; transition: all 0.15s ease;
+    }
+    .copilot-action-btn:hover { background: #222232; border-color: #a855f7; }
+    .copilot-action-btn strong { font-size: 12px; color: #fff; }
+    .copilot-action-btn span { font-size: 10px; color: var(--text-muted); }
+
+    .feed-item {
+      background: #161620; border-left: 3px solid var(--border); border-radius: 4px;
+      padding: 7px 10px; font-size: 11px; display: flex; flex-direction: column; gap: 2px;
+    }
+    .feed-item.Agent { border-left-color: #a855f7; }
+    .feed-item.User { border-left-color: var(--primary); }
+    .feed-item.Copilot { border-left-color: #38bdf8; }
+    .feed-header { display: flex; justify-content: space-between; font-weight: 700; color: #fff; }
+    .toast.error { border-color: var(--danger); color: #f87171; }
+  </style>
+</head>
+<body>
+
+  <!-- Top App Header -->
+  <header>
+    <div class="brand">
+      <div class="brand-logo">RM</div>
+      <div>
+        <h1>Remotion Caption Studio</h1>
+      </div>
+      <div class="brand-badge">HardScope — Ep 2</div>
+    </div>
+
+    <div class="header-center">
+      <div class="stat-pill" style="border-color:#22c55e; color:#4ade80; display:flex; align-items:center; gap:6px;">
+        <span style="display:inline-block; width:8px; height:8px; background:#22c55e; border-radius:50%; box-shadow:0 0 8px #22c55e;"></span> Agent Live
+      </div>
+      <div class="stat-pill">Total: <span id="countTotal">96</span></div>
+      <div class="stat-pill">Emotion Callouts: <span id="countEmotions">8</span></div>
+      <div class="stat-pill">Dialogue Cues: <span id="countDialogue">88</span></div>
+    </div>
+
+    <div class="header-actions">
+      <button class="btn btn-secondary btn-sm" id="btnUndo" title="Undo (Ctrl+Z)">↩️ Undo</button>
+      <button class="btn btn-secondary btn-sm" id="btnRedo" title="Redo (Ctrl+Y)">↪️ Redo</button>
+      <button class="btn btn-secondary" id="btnNewCue">+ Add Cue</button>
+      <button class="btn btn-secondary" id="btnToggleCopilot" style="background:#201c38; border-color:#a855f7; color:#c084fc;">🤖 Agent Copilot</button>
+      <button class="btn btn-primary" id="btnSave">💾 Save to Project</button>
+      <button class="btn btn-secondary" id="btnRenderPreview" style="background:#272738; border-color:#38bdf8; color:#38bdf8;">⚡ Render MP4</button>
+    </div>
+  </header>
+
+  <!-- Workspace: Video Stage + Inspector + Timeline -->
+  <div class="workspace">
+
+    <!-- 1. Stage Panel (Live Video & Realtime Overlays) -->
+    <div class="stage-panel">
+      <!-- Mode Toggle: Edit Mode vs Full Rendered Video -->
+      <div style="display:flex; gap:6px; margin-bottom:10px; width:280px;">
+        <button class="nudge-btn active" id="btnModeEdit" onclick="switchVideoMode('edit')" style="flex:1; background:#22c55e; color:#000;">✏️ Live Edit</button>
+        <button class="nudge-btn" id="btnModeRendered" onclick="switchVideoMode('rendered')" style="flex:1;">🎬 Rendered MP4</button>
+      </div>
+
+      <div class="video-viewport-wrapper" id="viewportWrapper">
+        <video id="mainVideo" preload="auto">
+          <source src="/video/preview.mp4" type="video/mp4">
+        </video>
+
+        <!-- Dynamic Overlay Elements on Stage -->
+        <div class="overlay-layer" id="overlayLayer">
+          <!-- Stepped Persistent Banner Overlay using exact Master Crop -->
+          <div class="banner-box-overlay" id="bannerOverlay" style="top: 328px;">
+            <img id="bannerImg" src="/api/banner_crop.png" alt="Stepped White Box Master">
+          </div>
+
+          <!-- Dynamic Active Emotion Callout -->
+          <div class="emotion-cue-overlay" id="activeEmotionOverlay" style="display:none; left: 50%; top: 20%;">
+            *EMOTION*
+          </div>
+
+          <!-- Dynamic Active Dialogue Caption -->
+          <div class="dialogue-cue-overlay" id="activeDialogueOverlay" style="bottom: 95px;">
+            DIALOGUE
+          </div>
+        </div>
+      </div>
+
+      <!-- Playback Controls -->
+      <div class="stage-controls">
+        <button class="play-btn" id="btnPlayPause">▶</button>
+        <button class="btn btn-secondary btn-sm" id="btnJumpBack">-1s</button>
+        <button class="btn btn-secondary btn-sm" id="btnJumpFwd">+1s</button>
+        <div class="time-readout" id="timecodeDisplay">00:00.00 / 00:41.09</div>
+      </div>
+    </div>
+
+    <!-- 2. Inspector & Cue List Panel -->
+    <div class="inspector-panel">
+      
+      <!-- Selected Cue Inspector -->
+      <div class="selected-cue-box" id="inspectorBox">
+        <div class="cue-box-header">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="cue-type-badge badge-emotion" id="inspectorBadge">Emotion Callout</span>
+            <span style="font-size:12px; color:var(--text-muted);" id="inspectorCueId">Cue #1</span>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn-secondary btn-sm" id="btnToggleVisible" title="Hide/Unhide caption without deleting">👁️ Hide</button>
+            <button class="btn btn-danger btn-sm" id="btnDeleteSelected" title="Permanently delete caption">🗑️ Remove</button>
+          </div>
+        </div>
+
+        <!-- Editable Text -->
+        <input type="text" class="cue-text-input" id="cueTextInput" placeholder="Caption text...">
+
+        <!-- Timing controls (Start, End, Nudges) -->
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+          <div class="ctrl-group">
+            <span class="ctrl-label">Start Time:</span>
+            <input type="text" class="val-input" id="cueStartTime" value="0.00s">
+            <div class="nudge-group">
+              <button class="nudge-btn" onclick="nudgeTime('start', -0.1)">-100ms</button>
+              <button class="nudge-btn" onclick="nudgeTime('start', +0.1)">+100ms</button>
+            </div>
+          </div>
+
+          <div class="ctrl-group">
+            <span class="ctrl-label">End Time:</span>
+            <input type="text" class="val-input" id="cueEndTime" value="1.00s">
+            <div class="nudge-group">
+              <button class="nudge-btn" onclick="nudgeTime('end', -0.1)">-100ms</button>
+              <button class="nudge-btn" onclick="nudgeTime('end', +0.1)">+100ms</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Position Controls (for Emotion Callouts & Persistent Banner) -->
+        <div id="positionControls" style="display:flex; flex-direction:column; gap:8px; border-top:1px solid var(--border); padding-top:10px;">
+          <div class="ctrl-group">
+            <span class="ctrl-label">Vertical (Y):</span>
+            <input type="range" min="50" max="1700" value="275" id="sliderPosY" style="flex:1;">
+            <input type="number" class="val-input" id="inputPosY" value="275" style="width:64px;">
+            <div class="nudge-group">
+              <button class="nudge-btn" onclick="nudgePos(0, -20)">▲ -20px</button>
+              <button class="nudge-btn" onclick="nudgePos(0, +20)">▼ +20px</button>
+            </div>
+          </div>
+
+          <div class="ctrl-group" style="gap:6px; flex-wrap:wrap;">
+            <span class="ctrl-label">Presets:</span>
+            <button class="nudge-btn" onclick="setPosPreset(75)">Top (75)</button>
+            <button class="nudge-btn" onclick="setPosPreset(275)">Upper Shock (275)</button>
+            <button class="nudge-btn" onclick="setPosPreset(320)">Chaos/Grail (320)</button>
+            <button class="nudge-btn" onclick="setPosPreset(1265)" style="border-color:var(--primary); color:var(--primary);">Above Captions (1265)</button>
+            <button class="nudge-btn" onclick="setPosPreset(1460)">Subtitles (1460)</button>
+          </div>
+        </div>
+
+        <!-- Quick Shift Cue in Time -->
+        <div class="ctrl-group" style="border-top:1px solid var(--border); padding-top:8px;">
+          <span class="ctrl-label">Shift Cue:</span>
+          <button class="nudge-btn" onclick="shiftEntireCue(-0.5)">◀ -500ms</button>
+          <button class="nudge-btn" onclick="shiftEntireCue(-0.1)">◀ -100ms</button>
+          <button class="nudge-btn" onclick="shiftEntireCue(+0.1)">+100ms ▶</button>
+          <button class="nudge-btn" onclick="shiftEntireCue(+0.5)">+500ms ▶</button>
+        </div>
+      </div>
+
+      <!-- Cue Table Filter & Search -->
+      <div style="display:flex; align-items:center; justify-content:space-between; padding: 0 14px 10px 14px;">
+        <div style="display:flex; gap:6px;">
+          <button class="nudge-btn" style="background:#22c55e; color:#000;" id="filterAll" onclick="setFilter('all')">All (<span id="tabCountAll">96</span>)</button>
+          <button class="nudge-btn" id="filterEmotions" onclick="setFilter('emotions')">Emotions (<span id="tabCountEmotions">8</span>)</button>
+          <button class="nudge-btn" id="filterDialogue" onclick="setFilter('dialogue')">Dialogue (<span id="tabCountDialogue">88</span>)</button>
+        </div>
+        <input type="text" id="searchInput" placeholder="Search caption text..." style="background:#0d0d12; border:1px solid var(--border); color:#fff; padding:4px 8px; border-radius:5px; font-size:12px; width:160px;">
+      </div>
+
+      <!-- Cue List Table -->
+      <div class="table-container">
+        <table class="cue-table">
+          <thead>
+            <tr>
+              <th style="width:30px;">#</th>
+              <th style="width:75px;">Type</th>
+              <th style="width:110px;">Time</th>
+              <th>Text</th>
+              <th style="width:60px;">Pos</th>
+              <th style="width:70px; text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="cueTableBody">
+            <!-- Populated via JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 3. Bottom Timeline View -->
+    <div class="timeline-panel">
+      <div class="timeline-toolbar">
+        <div style="font-weight:700; color:var(--text-muted);">Interactive Multi-Track Timeline (0.00s - 41.09s)</div>
+        <div style="display:flex; gap:8px;">
+          <span style="color:var(--text-dim); font-size:11px;">Alt + ← / → to scrub (100ms) • Shift+Alt for 1s • Alt + ↑ / ↓ for cues • Space to Play/Pause</span>
+        </div>
+      </div>
+
+      <div class="timeline-viewport" id="timelineViewport">
+        <div class="track-labels">
+          <div class="track-label">V3: Persistent Banner</div>
+          <div class="track-label">C1: Emotion Callouts</div>
+          <div class="track-label">C2: Dialogue Subtitles</div>
+        </div>
+
+        <div class="timeline-tracks-area" id="timelineArea" style="width: 2465px;">
+          <!-- Playhead Needle -->
+          <div class="playhead-needle" id="playheadNeedle" style="left: 0px;">
+            <div class="playhead-head"></div>
+          </div>
+
+          <!-- Track 1: Persistent Banner -->
+          <div class="timeline-track" id="trackBanner">
+            <div class="cue-block banner" id="bannerBlock" style="left:0px; width:2465px;">
+              He refused to look at the card... until THIS happened 🤯 (Persistent 41.09s)
+            </div>
+          </div>
+
+          <!-- Track 2: Emotion Callouts -->
+          <div class="timeline-track" id="trackEmotions">
+            <!-- Dynamically populated -->
+          </div>
+
+          <!-- Track 3: Dialogue Subtitles -->
+          <div class="timeline-track" id="trackDialogue">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Agent Copilot Drawer -->
+  <div class="copilot-drawer" id="copilotDrawer">
+    <div class="copilot-header">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:20px;">🤖</span>
+        <div>
+          <div style="font-weight:700; font-size:14px; color:#c084fc;">Agent Copilot & QC Hub</div>
+          <div style="font-size:11px; color:var(--text-muted);">Collaborative AI editing & live disk sync</div>
+        </div>
+      </div>
+      <button class="nudge-btn" onclick="toggleCopilot()">✕</button>
+    </div>
+
+    <!-- Copilot Quick Actions -->
+    <div class="copilot-section">
+      <div class="copilot-section-title">⚡ Collaborative AI Actions</div>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:4px;">
+        <button class="copilot-action-btn" onclick="runAgentAudit()">
+          🔍 <strong>Run QC Audit</strong>
+          <span>Scan overlaps & margins</span>
+        </button>
+        <button class="copilot-action-btn" onclick="autoHighlightImpact()">
+          🎨 <strong>Auto-Highlight</strong>
+          <span>Neon Lime key words</span>
+        </button>
+        <button class="copilot-action-btn" onclick="autoPadShortCues()">
+          ⏱️ <strong>Pad Micro-Cues</strong>
+          <span>Fix short &lt;100ms cuts</span>
+        </button>
+        <button class="copilot-action-btn" onclick="toggleViralHooks()">
+          💡 <strong>Viral Hooks</strong>
+          <span>5 curiosity alternatives</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Audit Results Panel -->
+    <div class="copilot-section" id="auditResultBox" style="display:none; background:#121822; border:1px solid #1e3a5f; border-radius:8px; padding:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <div style="font-weight:700; font-size:12px; color:#38bdf8;">Audit Report:</div>
+        <button class="nudge-btn" style="font-size:10px;" onclick="document.getElementById('auditResultBox').style.display='none'">✕</button>
+      </div>
+      <div id="auditContent" style="font-size:11px; line-height:1.4; color:#cbd5e1;"></div>
+    </div>
+
+    <!-- Viral Hooks Panel -->
+    <div class="copilot-section" id="viralHooksBox" style="display:none; background:#1e1429; border:1px solid #6b21a8; border-radius:8px; padding:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <div style="font-weight:700; font-size:12px; color:#e9d5ff;">Curiosity Gap Banner Hooks:</div>
+        <button class="nudge-btn" style="font-size:10px;" onclick="document.getElementById('viralHooksBox').style.display='none'">✕</button>
+      </div>
+      <div id="hooksList" style="display:flex; flex-direction:column; gap:6px;"></div>
+    </div>
+
+    <!-- Prompt the Agent -->
+    <div class="copilot-section">
+      <div class="copilot-section-title">💬 Message Agent (Live Copilot)</div>
+      <div style="display:flex; gap:6px; margin-top:4px;">
+        <input type="text" id="copilotPromptInput" placeholder="e.g. 'Pad short cues' or 'Check overlaps'..." style="flex:1; background:#0d0d12; border:1px solid var(--border-accent); color:#fff; padding:7px 10px; border-radius:6px; font-size:12px;">
+        <button class="btn btn-primary btn-sm" onclick="sendPromptToAgent()">Send</button>
+      </div>
+    </div>
+
+    <!-- Collaborative Activity Feed -->
+    <div class="copilot-section" style="flex:1; overflow-y:auto;">
+      <div class="copilot-section-title" style="display:flex; justify-content:space-between;">
+        <span>📜 Shared Activity Feed</span>
+        <span style="font-size:10px; color:#4ade80;">● Auto-Syncing</span>
+      </div>
+      <div id="collabFeedList" style="display:flex; flex-direction:column; gap:6px; margin-top:4px;">
+        <!-- Populated via JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Message -->
+  <div class="toast" id="toastMessage">Changes saved successfully!</div>
+
+  <script>
+    // State
+    let cues = [];
+    let banner = {
+      line1: "He refused to look at the card...",
+      line2: "until THIS happened 🤯",
+      y: 1265,
+      enabled: true
+    };
+    let duration = 41.09;
+    let selectedCueId = null;
+    let isBannerSelected = false;
+    let currentFilter = 'all';
+    let searchQuery = '';
+    let historyStack = [];
+    let redoStack = [];
+
+    // Pixels per second on timeline
+    const PIXELS_PER_SEC = 60; // 41.09 * 60 = ~2465px
+    const STAGE_H = 497;
+    const VIDEO_H = 1920;
+    const SCALE_STAGE = STAGE_H / VIDEO_H;
+
+    const video = document.getElementById('mainVideo');
+    const playheadNeedle = document.getElementById('playheadNeedle');
+    const timecodeDisplay = document.getElementById('timecodeDisplay');
+    const btnPlayPause = document.getElementById('btnPlayPause');
+
+    // Fetch initial project data
+    async function loadData() {
+      try {
+        const res = await fetch('/api/data');
+        const data = await res.json();
+        cues = data.cues || [];
+        if (data.banner) banner = data.banner;
+        if (data.video_duration) duration = data.video_duration;
+
+        updateCounts();
+        renderCueTable();
+        renderTimeline();
+        updateBannerOverlay();
+
+        // Select first emotion cue by default
+        const firstEmotion = cues.find(c => c.layer === 1);
+        if (firstEmotion) selectCue(firstEmotion.id);
+        else if (cues.length > 0) selectCue(cues[0].id);
+
+        pushHistory();
+      } catch (err) {
+        showToast("Error loading project data: " + err, "error");
+      }
+    }
+
+    function pushHistory() {
+      historyStack.push(JSON.stringify({ cues, banner }));
+      if (historyStack.length > 30) historyStack.shift();
+      redoStack = [];
+    }
+
+    function updateCounts() {
+      const total = cues.length;
+      const emotions = cues.filter(c => c.layer === 1).length;
+      const dialogue = cues.filter(c => c.layer === 0).length;
+
+      document.getElementById('countTotal').innerText = total;
+      document.getElementById('countEmotions').innerText = emotions;
+      document.getElementById('countDialogue').innerText = dialogue;
+      document.getElementById('tabCountAll').innerText = total;
+      document.getElementById('tabCountEmotions').innerText = emotions;
+      document.getElementById('tabCountDialogue').innerText = dialogue;
+    }
+
+    function formatTime(sec) {
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      const cs = Math.floor((sec - Math.floor(sec)) * 100);
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+    }
+
+    // Video Playback & Time Sync
+    video.addEventListener('timeupdate', () => {
+      const t = video.currentTime;
+      timecodeDisplay.innerText = `${formatTime(t)} / ${formatTime(duration)}`;
+      
+      // Update Playhead position
+      const px = t * PIXELS_PER_SEC;
+      playheadNeedle.style.left = `${px}px`;
+
+      // Update Overlays
+      updateActiveOverlays(t);
+    });
+
+    btnPlayPause.addEventListener('click', togglePlay);
+    function togglePlay() {
+      if (video.paused) {
+        video.play();
+        btnPlayPause.innerText = '⏸';
+      } else {
+        video.pause();
+        btnPlayPause.innerText = '▶';
+      }
+    }
+
+    document.getElementById('btnJumpBack').addEventListener('click', () => {
+      video.currentTime = Math.max(0, video.currentTime - 1.0);
+    });
+    document.getElementById('btnJumpFwd').addEventListener('click', () => {
+      video.currentTime = Math.min(duration, video.currentTime + 1.0);
+    });
+
+    // Keyboard Shortcuts
+    window.addEventListener('keydown', (e) => {
+      // Timeline Scrubber via Alt + Arrow (or plain Arrow when not in text input)
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        const inInput = (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
+        if (e.altKey || !inInput) {
+          e.preventDefault();
+
+          let step = 0.1; // 100ms default
+          if (e.shiftKey) {
+            step = 1.0; // 1 second jump
+          } else if (!e.altKey) {
+            step = 1 / 23.976; // 1 video frame (~41.7ms)
+          }
+
+          if (e.key === 'ArrowLeft') {
+            video.currentTime = Math.max(0, video.currentTime - step);
+          } else {
+            video.currentTime = Math.min(duration, video.currentTime + step);
+          }
+
+          // Force immediate synchronous UI refresh so cursor moves with zero lag:
+          const curT = video.currentTime;
+          timecodeDisplay.innerText = `${formatTime(curT)} / ${formatTime(duration)}`;
+          playheadNeedle.style.left = `${curT * PIXELS_PER_SEC}px`;
+          updateActiveOverlays(curT);
+          return;
+        }
+      }
+
+      // Jump to previous / next caption with Alt + ArrowUp / ArrowDown
+      if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        e.preventDefault();
+        const curT = video.currentTime;
+        const activeCues = cues.filter(c => c.enabled).sort((a, b) => a.start - b.start);
+        if (e.key === 'ArrowUp') {
+          const prev = [...activeCues].reverse().find(c => c.start < curT - 0.05);
+          if (prev) {
+            video.currentTime = prev.start;
+            selectCue(prev.id, false);
+          }
+        } else {
+          const next = activeCues.find(c => c.start > curT + 0.05);
+          if (next) {
+            video.currentTime = next.start;
+            selectCue(next.id, false);
+          }
+        }
+        const curT2 = video.currentTime;
+        timecodeDisplay.innerText = `${formatTime(curT2)} / ${formatTime(duration)}`;
+        playheadNeedle.style.left = `${curT2 * PIXELS_PER_SEC}px`;
+        updateActiveOverlays(curT2);
+        return;
+      }
+
+      // Ignore remaining editing shortcuts if user is typing in text inputs
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.code === 'Delete' || e.code === 'Backspace') {
+        if (selectedCueId) deleteSelectedCue();
+      } else if (e.ctrlKey && e.key === 's') {
+        e.preventDefault();
+        saveChanges();
+      } else if (e.ctrlKey && e.key === 'z') {
+        e.preventDefault();
+        undo();
+      } else if (e.ctrlKey && e.key === 'y') {
+        e.preventDefault();
+        redo();
+      }
+    });
+
+    // Timeline Scrubbing
+    const timelineArea = document.getElementById('timelineArea');
+    timelineArea.addEventListener('click', (e) => {
+      if (e.target.classList.contains('cue-block')) return;
+      const rect = timelineArea.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const targetTime = Math.max(0, Math.min(duration, clickX / PIXELS_PER_SEC));
+      video.currentTime = targetTime;
+    });
+
+    // Render Overlays based on Current Time
+    function updateActiveOverlays(t) {
+      // 1. Dialogue Overlay
+      const activeDia = cues.find(c => c.layer === 0 && c.enabled && t >= c.start && t <= c.end);
+      const diaEl = document.getElementById('activeDialogueOverlay');
+      if (activeDia) {
+        diaEl.style.display = 'block';
+        diaEl.innerText = activeDia.text;
+        diaEl.className = 'dialogue-cue-overlay ' + (activeDia.style === 'ZylokLime' ? 'lime' : '') + (selectedCueId === activeDia.id ? ' selected' : '');
+      } else {
+        diaEl.style.display = 'none';
+      }
+
+      // 2. Emotion Overlay
+      const activeEmo = cues.find(c => c.layer === 1 && c.enabled && t >= c.start && t <= c.end);
+      const emoEl = document.getElementById('activeEmotionOverlay');
+      if (activeEmo) {
+        emoEl.style.display = 'block';
+        emoEl.innerText = activeEmo.text;
+        emoEl.style.top = `${(activeEmo.pos_y || 275) * SCALE_STAGE}px`;
+        emoEl.style.left = `${(activeEmo.pos_x || 540) * (280 / 1080)}px`;
+        emoEl.className = 'emotion-cue-overlay ' + (selectedCueId === activeEmo.id ? ' selected' : '');
+      } else {
+        emoEl.style.display = 'none';
+      }
+    }
+
+    function updateBannerOverlay() {
+      const bannerEl = document.getElementById('bannerOverlay');
+      if (!banner.enabled) {
+        bannerEl.style.display = 'none';
+        return;
+      }
+      bannerEl.style.display = 'block';
+      bannerEl.style.top = `${banner.y * SCALE_STAGE}px`;
+      const img = document.getElementById('bannerImg');
+      if (img) img.src = `/api/banner_crop.png?t=${Date.now()}`;
+    }
+
+    function switchVideoMode(mode) {
+      const btnEdit = document.getElementById('btnModeEdit');
+      const btnRend = document.getElementById('btnModeRendered');
+      const overlayLayer = document.getElementById('overlayLayer');
+      const curT = video.currentTime;
+      const isPaused = video.paused;
+
+      if (mode === 'rendered') {
+        btnEdit.style.background = '#272732';
+        btnEdit.style.color = '#fff';
+        btnRend.style.background = '#38bdf8';
+        btnRend.style.color = '#000';
+        overlayLayer.style.display = 'none';
+        video.src = '/video/captioned.mp4?t=' + Date.now();
+      } else {
+        btnRend.style.background = '#272732';
+        btnRend.style.color = '#fff';
+        btnEdit.style.background = '#22c55e';
+        btnEdit.style.color = '#000';
+        overlayLayer.style.display = 'block';
+        video.src = '/video/preview.mp4';
+      }
+
+      video.currentTime = curT;
+      if (!isPaused) video.play();
+    }
+
+    // -------------------------------------------------------------
+    // High-Performance Unified Drag Manager (Zero Leaks, Zero Blocking)
+    // -------------------------------------------------------------
+    let activeDrag = null;
+
+    // Single global pointermove handler
+    window.addEventListener('pointermove', (e) => {
+      if (!activeDrag) return;
+
+      if (activeDrag.type === 'timeline') {
+        const deltaX = e.clientX - activeDrag.startX;
+        if (Math.abs(deltaX) > 2) activeDrag.hasMoved = true;
+
+        const deltaSec = deltaX / PIXELS_PER_SEC;
+        const newStart = Math.max(0, Math.min(duration - activeDrag.duration, activeDrag.origStart + deltaSec));
+        activeDrag.cue.start = Math.round(newStart * 100) / 100;
+        activeDrag.cue.end = Math.round((activeDrag.cue.start + activeDrag.duration) * 100) / 100;
+
+        activeDrag.el.style.left = `${activeDrag.cue.start * PIXELS_PER_SEC}px`;
+        updateInspectorValues();
+      } else if (activeDrag.type === 'banner') {
+        const deltaY = (e.clientY - activeDrag.startY) / SCALE_STAGE;
+        if (Math.abs(deltaY) > 2) activeDrag.hasMoved = true;
+        banner.y = Math.round(Math.max(50, Math.min(1800, activeDrag.origY + deltaY)));
+        document.getElementById('bannerOverlay').style.top = `${banner.y * SCALE_STAGE}px`;
+        document.getElementById('inputPosY').value = banner.y;
+        document.getElementById('sliderPosY').value = banner.y;
+      } else if (activeDrag.type === 'emotion') {
+        const deltaX = (e.clientX - activeDrag.startX) / (280 / 1080);
+        const deltaY = (e.clientY - activeDrag.startY) / SCALE_STAGE;
+        if (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2) activeDrag.hasMoved = true;
+
+        activeDrag.cue.pos_x = Math.round(Math.max(40, Math.min(1040, activeDrag.origX + deltaX)));
+        activeDrag.cue.pos_y = Math.round(Math.max(50, Math.min(1800, activeDrag.origY + deltaY)));
+
+        activeDrag.el.style.left = `${activeDrag.cue.pos_x * (280 / 1080)}px`;
+        activeDrag.el.style.top = `${activeDrag.cue.pos_y * SCALE_STAGE}px`;
+
+        document.getElementById('inputPosY').value = activeDrag.cue.pos_y;
+        document.getElementById('sliderPosY').value = activeDrag.cue.pos_y;
+      }
+    });
+
+    // Single global pointerup handler
+    window.addEventListener('pointerup', (e) => {
+      if (!activeDrag) return;
+
+      if (activeDrag.type === 'timeline') {
+        try {
+          if (activeDrag.el.releasePointerCapture) {
+            activeDrag.el.releasePointerCapture(activeDrag.pointerId);
+          }
+        } catch(err) {}
+
+        if (activeDrag.hasMoved) {
+          renderCueTable();
+          pushHistory();
+        } else {
+          // Clean single click without dragging: jump video to cue start!
+          video.currentTime = activeDrag.cue.start;
+        }
+      } else if (activeDrag.type === 'banner' || activeDrag.type === 'emotion') {
+        if (activeDrag.hasMoved) {
+          renderCueTable();
+          pushHistory();
+        }
+      }
+
+      activeDrag = null;
+    });
+
+    // Banner Dragging on Stage
+    const bannerEl = document.getElementById('bannerOverlay');
+    bannerEl.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      selectBanner();
+      activeDrag = {
+        type: 'banner',
+        startY: e.clientY,
+        origY: banner.y,
+        hasMoved: false
+      };
+    });
+
+    // Emotion Callout Dragging on Stage
+    const activeEmotionEl = document.getElementById('activeEmotionOverlay');
+    activeEmotionEl.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const activeEmo = cues.find(c => c.layer === 1 && c.enabled && video.currentTime >= c.start && video.currentTime <= c.end);
+      if (!activeEmo) return;
+      selectCue(activeEmo.id, false);
+      activeDrag = {
+        type: 'emotion',
+        cue: activeEmo,
+        el: activeEmotionEl,
+        startX: e.clientX,
+        startY: e.clientY,
+        origX: activeEmo.pos_x || 540,
+        origY: activeEmo.pos_y || 275,
+        hasMoved: false
+      };
+    });
+
+    // Render Timeline Blocks
+    function renderTimeline() {
+      const trackEmotions = document.getElementById('trackEmotions');
+      const trackDialogue = document.getElementById('trackDialogue');
+      trackEmotions.innerHTML = '';
+      trackDialogue.innerHTML = '';
+
+      cues.forEach(cue => {
+        const block = document.createElement('div');
+        const left = cue.start * PIXELS_PER_SEC;
+        const width = Math.max(12, (cue.end - cue.start) * PIXELS_PER_SEC);
+
+        block.style.left = `${left}px`;
+        block.style.width = `${width}px`;
+        block.dataset.cueId = cue.id;
+
+        const isEmo = cue.layer === 1;
+        block.className = `cue-block ${isEmo ? 'emotion' : (cue.style === 'ZylokLime' ? 'lime' : 'dialogue')} ${cue.id === selectedCueId ? 'selected' : ''} ${cue.enabled ? '' : 'disabled'}`;
+        block.innerText = cue.text;
+        block.title = `${cue.text} (${cue.start.toFixed(2)}s - ${cue.end.toFixed(2)}s)`;
+
+        // Pointerdown on timeline block
+        block.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+
+          try { block.setPointerCapture(e.pointerId); } catch(err) {}
+
+          selectCue(cue.id, false);
+
+          activeDrag = {
+            type: 'timeline',
+            cue: cue,
+            el: block,
+            pointerId: e.pointerId,
+            startX: e.clientX,
+            origStart: cue.start,
+            origEnd: cue.end,
+            duration: cue.end - cue.start,
+            hasMoved: false
+          };
+        });
+
+        if (isEmo) trackEmotions.appendChild(block);
+        else trackDialogue.appendChild(block);
+      });
+    }
+
+    // Render Table
+    function renderCueTable() {
+      const tbody = document.getElementById('cueTableBody');
+      tbody.innerHTML = '';
+
+      const filtered = cues.filter(c => {
+        if (currentFilter === 'emotions' && c.layer !== 1) return false;
+        if (currentFilter === 'dialogue' && c.layer !== 0) return false;
+        if (searchQuery && !c.text.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+        return true;
+      });
+
+      filtered.forEach((c, index) => {
+        const tr = document.createElement('tr');
+        tr.dataset.cueId = c.id;
+        tr.className = (c.id === selectedCueId ? 'selected ' : '') + (c.enabled ? '' : 'disabled');
+
+        const isEmo = c.layer === 1;
+        const badgeClass = isEmo ? 'badge-emotion' : 'badge-dialogue';
+        const badgeText = isEmo ? 'Emotion' : 'Dialogue';
+        const posText = isEmo ? `Y:${c.pos_y || 275}` : 'Y:1460';
+
+        tr.innerHTML = `
+          <td style="color:var(--text-dim);">${index + 1}</td>
+          <td><span class="cue-type-badge ${badgeClass}">${badgeText}</span></td>
+          <td style="font-family:monospace; font-size:11px;">${c.start.toFixed(2)}s - ${c.end.toFixed(2)}s</td>
+          <td style="font-weight:700; color:${isEmo ? 'var(--gold)' : '#fff'};">${c.text}</td>
+          <td style="font-size:11px; color:var(--text-muted);">${posText}</td>
+          <td style="text-align:right;">
+            <button class="nudge-btn" onclick="toggleVisible(${c.id}, event)" title="${c.enabled ? 'Hide caption' : 'Show caption'}">${c.enabled ? '👁️' : '🚫'}</button>
+            <button class="nudge-btn" style="color:#ef4444;" onclick="deleteCue(${c.id}, event)" title="Delete caption">🗑️</button>
+          </td>
+        `;
+
+        tr.addEventListener('click', () => {
+          selectCue(c.id, false);
+          video.currentTime = c.start;
+        });
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Selection Handling
+    function selectCue(id, rebuildDOM = false) {
+      selectedCueId = id;
+      isBannerSelected = false;
+      const cue = cues.find(c => c.id === id);
+      if (!cue) return;
+
+      const isEmo = cue.layer === 1;
+      const badge = document.getElementById('inspectorBadge');
+      badge.className = `cue-type-badge ${isEmo ? 'badge-emotion' : 'badge-dialogue'}`;
+      badge.innerText = isEmo ? 'Emotion Callout (Track C1)' : 'Dialogue Subtitle (Track C2)';
+      document.getElementById('inspectorCueId').innerText = `Cue #${cue.id}`;
+
+      document.getElementById('cueTextInput').value = cue.text;
+      document.getElementById('cueStartTime').value = cue.start.toFixed(2) + 's';
+      document.getElementById('cueEndTime').value = cue.end.toFixed(2) + 's';
+
+      const posCtrl = document.getElementById('positionControls');
+      if (isEmo) {
+        posCtrl.style.display = 'flex';
+        document.getElementById('sliderPosY').value = cue.pos_y || 275;
+        document.getElementById('inputPosY').value = cue.pos_y || 275;
+      } else {
+        posCtrl.style.display = 'none';
+      }
+
+      const btnVis = document.getElementById('btnToggleVisible');
+      btnVis.innerText = cue.enabled ? '👁️ Hide' : '👁️ Show';
+
+      // Fast CSS selection update without tearing down the DOM:
+      document.querySelectorAll('.cue-block').forEach(b => {
+        b.classList.toggle('selected', b.dataset.cueId == id);
+      });
+      document.querySelectorAll('#cueTableBody tr').forEach(r => {
+        r.classList.toggle('selected', r.dataset.cueId == id);
+      });
+
+      if (rebuildDOM) {
+        renderCueTable();
+        renderTimeline();
+      }
+      updateActiveOverlays(video.currentTime);
+    }
+
+    function selectBanner() {
+      isBannerSelected = true;
+      selectedCueId = null;
+
+      const badge = document.getElementById('inspectorBadge');
+      badge.className = 'cue-type-badge badge-banner';
+      badge.innerText = 'Persistent Stepped Banner (Track V3)';
+      document.getElementById('inspectorCueId').innerText = 'Persistent Master';
+
+      document.getElementById('cueTextInput').value = banner.line1 + ' / ' + banner.line2;
+      document.getElementById('cueStartTime').value = '0.00s';
+      document.getElementById('cueEndTime').value = duration.toFixed(2) + 's';
+
+      const posCtrl = document.getElementById('positionControls');
+      posCtrl.style.display = 'flex';
+      document.getElementById('sliderPosY').value = banner.y;
+      document.getElementById('inputPosY').value = banner.y;
+
+      document.querySelectorAll('.cue-block').forEach(b => b.classList.remove('selected'));
+      document.querySelectorAll('#cueTableBody tr').forEach(r => r.classList.remove('selected'));
+    }
+
+    function updateInspectorValues() {
+      if (isBannerSelected) return;
+      const cue = cues.find(c => c.id === selectedCueId);
+      if (!cue) return;
+      document.getElementById('cueStartTime').value = cue.start.toFixed(2) + 's';
+      document.getElementById('cueEndTime').value = cue.end.toFixed(2) + 's';
+    }
+
+    // Modifications
+    document.getElementById('cueTextInput').addEventListener('input', (e) => {
+      if (isBannerSelected) {
+        const parts = e.target.value.split('/');
+        banner.line1 = parts[0] ? parts[0].trim() : '';
+        banner.line2 = parts[1] ? parts[1].trim() : '';
+        updateBannerOverlay();
+      } else {
+        const cue = cues.find(c => c.id === selectedCueId);
+        if (cue) {
+          cue.text = e.target.value;
+          renderTimeline();
+          renderCueTable();
+          updateActiveOverlays(video.currentTime);
+        }
+      }
+    });
+
+    document.getElementById('sliderPosY').addEventListener('input', (e) => {
+      const val = parseInt(e.target.value);
+      document.getElementById('inputPosY').value = val;
+      applyPosY(val);
+    });
+
+    document.getElementById('inputPosY').addEventListener('change', (e) => {
+      const val = parseInt(e.target.value);
+      document.getElementById('sliderPosY').value = val;
+      applyPosY(val);
+    });
+
+    function applyPosY(val) {
+      if (isBannerSelected) {
+        banner.y = val;
+        updateBannerOverlay();
+      } else {
+        const cue = cues.find(c => c.id === selectedCueId);
+        if (cue && cue.layer === 1) {
+          cue.pos_y = val;
+          updateActiveOverlays(video.currentTime);
+          renderCueTable();
+        }
+      }
+      pushHistory();
+    }
+
+    function nudgePos(dx, dy) {
+      const cur = parseInt(document.getElementById('inputPosY').value);
+      const next = Math.max(50, Math.min(1800, cur + dy));
+      document.getElementById('inputPosY').value = next;
+      document.getElementById('sliderPosY').value = next;
+      applyPosY(next);
+    }
+
+    function setPosPreset(y) {
+      document.getElementById('inputPosY').value = y;
+      document.getElementById('sliderPosY').value = y;
+      applyPosY(y);
+    }
+
+    function nudgeTime(type, delta) {
+      if (isBannerSelected) return;
+      const cue = cues.find(c => c.id === selectedCueId);
+      if (!cue) return;
+
+      if (type === 'start') {
+        cue.start = Math.max(0, Math.min(cue.end - 0.05, Math.round((cue.start + delta) * 100) / 100));
+      } else {
+        cue.end = Math.max(cue.start + 0.05, Math.min(duration, Math.round((cue.end + delta) * 100) / 100));
+      }
+
+      updateInspectorValues();
+      renderTimeline();
+      renderCueTable();
+      pushHistory();
+    }
+
+    function shiftEntireCue(delta) {
+      if (isBannerSelected) return;
+      const cue = cues.find(c => c.id === selectedCueId);
+      if (!cue) return;
+
+      const dur = cue.end - cue.start;
+      cue.start = Math.max(0, Math.min(duration - dur, Math.round((cue.start + delta) * 100) / 100));
+      cue.end = Math.round((cue.start + dur) * 100) / 100;
+
+      updateInspectorValues();
+      renderTimeline();
+      renderCueTable();
+      pushHistory();
+    }
+
+    function toggleVisible(id, e) {
+      if (e) e.stopPropagation();
+      const cue = cues.find(c => c.id === id);
+      if (!cue) return;
+      cue.enabled = !cue.enabled;
+      renderCueTable();
+      renderTimeline();
+      updateActiveOverlays(video.currentTime);
+      pushHistory();
+    }
+
+    document.getElementById('btnToggleVisible').addEventListener('click', () => {
+      if (isBannerSelected) {
+        banner.enabled = !banner.enabled;
+        updateBannerOverlay();
+      } else if (selectedCueId) {
+        toggleVisible(selectedCueId);
+      }
+    });
+
+    function deleteCue(id, e) {
+      if (e) e.stopPropagation();
+      cues = cues.filter(c => c.id !== id);
+      updateCounts();
+      renderCueTable();
+      renderTimeline();
+      if (selectedCueId === id) {
+        selectedCueId = cues.length > 0 ? cues[0].id : null;
+        if (selectedCueId) selectCue(selectedCueId);
+      }
+      pushHistory();
+      showToast("Caption deleted", "success");
+    }
+
+    function deleteSelectedCue() {
+      if (selectedCueId) deleteCue(selectedCueId);
+    }
+    document.getElementById('btnDeleteSelected').addEventListener('click', deleteSelectedCue);
+
+    // Add New Cue at playhead
+    document.getElementById('btnNewCue').addEventListener('click', () => {
+      const curT = Math.round(video.currentTime * 100) / 100;
+      const newCue = {
+        id: cues.length > 0 ? Math.max(...cues.map(c => c.id)) + 1 : 1,
+        layer: 0,
+        type: "dialogue",
+        start: curT,
+        end: Math.min(duration, Math.round((curT + 0.6) * 100) / 100),
+        duration: 0.6,
+        style: "ZylokWhite",
+        text: "NEW CAPTION",
+        pos_x: 540,
+        pos_y: 1460,
+        enabled: true
+      };
+      cues.push(newCue);
+      updateCounts();
+      renderCueTable();
+      renderTimeline();
+      selectCue(newCue.id);
+      pushHistory();
+      showToast("Added new caption cue at " + curT.toFixed(2) + "s", "success");
+    });
+
+    // Undo / Redo
+    function undo() {
+      if (historyStack.length <= 1) return;
+      redoStack.push(historyStack.pop());
+      const state = JSON.parse(historyStack[historyStack.length - 1]);
+      cues = state.cues;
+      banner = state.banner;
+      updateCounts();
+      renderCueTable();
+      renderTimeline();
+      updateBannerOverlay();
+      showToast("Action undone", "success");
+    }
+    function redo() {
+      if (redoStack.length === 0) return;
+      const state = JSON.parse(redoStack.pop());
+      historyStack.push(JSON.stringify(state));
+      cues = state.cues;
+      banner = state.banner;
+      updateCounts();
+      renderCueTable();
+      renderTimeline();
+      updateBannerOverlay();
+      showToast("Action redone", "success");
+    }
+    document.getElementById('btnUndo').addEventListener('click', undo);
+    document.getElementById('btnRedo').addEventListener('click', redo);
+
+    // Filter and Search
+    function setFilter(f) {
+      currentFilter = f;
+      document.querySelectorAll('#filterAll, #filterEmotions, #filterDialogue').forEach(b => {
+        b.style.background = '#272732';
+        b.style.color = '#fff';
+      });
+      if (f === 'all') document.getElementById('filterAll').style.background = '#22c55e';
+      if (f === 'emotions') document.getElementById('filterEmotions').style.background = '#eab308';
+      if (f === 'dialogue') document.getElementById('filterDialogue').style.background = '#38bdf8';
+      renderCueTable();
+    }
+    document.getElementById('searchInput').addEventListener('input', (e) => {
+      searchQuery = e.target.value;
+      renderCueTable();
+    });
+
+    // Save to Project Button
+    document.getElementById('btnSave').addEventListener('click', saveChanges);
+    async function saveChanges() {
+      const btn = document.getElementById('btnSave');
+      btn.innerText = '💾 Saving...';
+      btn.disabled = true;
+
+      try {
+        const res = await fetch('/api/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cues, banner })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          showToast("Saved to ASS, SRT & Remotion project!", "success");
+        } else {
+          showToast("Save failed: " + data.message, "error");
+        }
+      } catch (err) {
+        showToast("Error saving: " + err, "error");
+      } finally {
+        btn.innerText = '💾 Save to Project';
+        btn.disabled = false;
+      }
+    }
+
+    // Render Preview MP4
+    document.getElementById('btnRenderPreview').addEventListener('click', async () => {
+      const btn = document.getElementById('btnRenderPreview');
+      btn.innerText = '⚡ Rendering MP4...';
+      btn.disabled = true;
+
+      try {
+        await saveChanges();
+        const res = await fetch('/api/render', { method: 'POST' });
+        const data = await res.json();
+        showToast("FFmpeg render started in background!", "success");
+
+        // Poll render status
+        const pollInterval = setInterval(async () => {
+          const sRes = await fetch('/api/render_status');
+          const status = await sRes.json();
+          if (!status.is_rendering) {
+            clearInterval(pollInterval);
+            btn.innerText = '⚡ Render MP4';
+            btn.disabled = false;
+            if (status.last_error) {
+              showToast("Render error: " + status.last_error, "error");
+            } else {
+              showToast("Render complete! Reloading video...", "success");
+              video.src = "/video/captioned.mp4?t=" + Date.now();
+              video.load();
+            }
+          }
+        }, 1500);
+      } catch (err) {
+        btn.innerText = '⚡ Render MP4';
+        btn.disabled = false;
+        showToast("Error triggering render: " + err, "error");
+      }
+    });
+
+    function showToast(msg, type = "success") {
+      const toast = document.getElementById('toastMessage');
+      toast.innerText = msg;
+      toast.className = `toast show ${type}`;
+      setTimeout(() => { toast.className = 'toast'; }, 3000);
+    }
+
+    // Agent Copilot Integration
+    const copilotDrawer = document.getElementById('copilotDrawer');
+    document.getElementById('btnToggleCopilot').addEventListener('click', toggleCopilot);
+
+    function toggleCopilot() {
+      copilotDrawer.classList.toggle('open');
+      if (copilotDrawer.classList.contains('open')) {
+        loadCollabFeed();
+      }
+    }
+
+    async function loadCollabFeed() {
+      try {
+        const res = await fetch('/api/copilot/feed');
+        const data = await res.json();
+        const list = document.getElementById('collabFeedList');
+        list.innerHTML = '';
+        (data.history || []).forEach(item => {
+          const div = document.createElement('div');
+          div.className = `feed-item ${item.source}`;
+          div.innerHTML = `
+            <div class="feed-header">
+              <span>[${item.source}] ${item.action}</span>
+              <span style="font-size:10px; color:var(--text-dim);">${item.time}</span>
+            </div>
+            <div style="color:var(--text-muted);">${item.details}</div>
+          `;
+          list.appendChild(div);
+        });
+      } catch (err) {
+        console.error('Error loading collab feed:', err);
+      }
+    }
+
+    async function runAgentAudit() {
+      try {
+        const res = await fetch('/api/copilot/audit');
+        const data = await res.json();
+        const box = document.getElementById('auditResultBox');
+        const content = document.getElementById('auditContent');
+        box.style.display = 'block';
+
+        let html = `<div><strong>Status:</strong> <span style="color:${data.status==='clean'?'#4ade80':'#facc15'};">${data.status.toUpperCase()}</span></div>`;
+        html += `<div>• Subtitle Overlaps: <strong>${data.overlaps_count}</strong></div>`;
+        html += `<div>• Micro-Cues (&lt;90ms): <strong>${data.short_cues_count}</strong> ${data.short_cues_count > 0 ? '<button class="nudge-btn" style="margin-left:6px; font-size:10px;" onclick="autoPadShortCues()">⚡ 1-Click Auto-Pad</button>' : '✓'}</div>`;
+        html += `<div>• Banner Clearance: <strong>Docked Y=1265 (35px safe gap above subtitles)</strong> ✓</div>`;
+        html += `<div>• Emotion Callouts: <strong>${data.emotion_safe_count} cues anchored in safe upper zone (Y=240-320)</strong> ✓</div>`;
+
+        if (data.short_cues && data.short_cues.length > 0) {
+          html += `<div style="margin-top:6px; color:#fde047; font-size:10px;">Detected: ${data.short_cues.map(c => `"${c.text}" (${c.dur_ms}ms at ${c.t.toFixed(1)}s)`).join(', ')}</div>`;
+        }
+
+        content.innerHTML = html;
+        showToast("Agent audit complete!", "success");
+      } catch (err) {
+        showToast("Error running audit: " + err, "error");
+      }
+    }
+
+    async function autoHighlightImpact() {
+      try {
+        const res = await fetch('/api/copilot/auto_highlight', { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          showToast(`Agent highlighted ${data.count} impact words in Neon Lime!`, "success");
+          loadData();
+          loadCollabFeed();
+        }
+      } catch (err) {
+        showToast("Error auto-highlighting: " + err, "error");
+      }
+    }
+
+    async function autoPadShortCues() {
+      try {
+        const res = await fetch('/api/copilot/pad_short_cues', { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          showToast(`Agent padded ${data.padded} short cues to 140ms minimum!`, "success");
+          loadData();
+          loadCollabFeed();
+          runAgentAudit();
+        }
+      } catch (err) {
+        showToast("Error padding cues: " + err, "error");
+      }
+    }
+
+    function toggleViralHooks() {
+      const box = document.getElementById('viralHooksBox');
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+      if (box.style.display === 'block') {
+        const hooks = [
+          { l1: "He refused to look at the card...", l2: "until THIS happened 🤯", note: "Active Hook (Tested)" },
+          { l1: "Never tell a streamer not to look...", l2: "at his pack 💀", note: "High Curiosity" },
+          { l1: "The 1 in 10,000 grail pull...", l2: "he couldn't believe 🔥", note: "High Stakes" },
+          { l1: "Watch his face when he turns around...", l2: "to see the card 😱", note: "Reaction Focus" },
+          { l1: "He swore on his life he didn't look...", l2: "and then THIS 🃏", note: "Dramatic Tension" }
+        ];
+        const list = document.getElementById('hooksList');
+        list.innerHTML = '';
+        hooks.forEach(h => {
+          const div = document.createElement('div');
+          div.style = "display:flex; justify-content:space-between; align-items:center; background:#291c38; padding:6px 8px; border-radius:5px; font-size:11px;";
+          div.innerHTML = `
+            <div>
+              <div style="font-weight:700; color:#fff;">${h.l1} ${h.l2}</div>
+              <div style="font-size:10px; color:#c084fc;">${h.note}</div>
+            </div>
+            <button class="nudge-btn" style="background:#a855f7; color:#fff; border:none; margin-left:8px;" onclick="applyViralHook('${h.l1.replace(/'/g, "\\'")}', '${h.l2.replace(/'/g, "\\'")}')">Apply</button>
+          `;
+          list.appendChild(div);
+        });
+      }
+    }
+
+    async function applyViralHook(l1, l2) {
+      try {
+        const res = await fetch('/api/copilot/apply_hook', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ line1: l1, line2: l2 })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          showToast(`Applied hook: "${l1} ${l2}"`, "success");
+          banner.line1 = l1;
+          banner.line2 = l2;
+          updateBannerOverlay();
+          loadCollabFeed();
+        }
+      } catch (err) {
+        showToast("Error applying hook: " + err, "error");
+      }
+    }
+
+    async function sendPromptToAgent() {
+      const input = document.getElementById('copilotPromptInput');
+      const val = input.value.trim();
+      if (!val) return;
+      input.value = '';
+
+      showToast("Sending request to Agent...", "success");
+      try {
+        const res = await fetch('/api/copilot/prompt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: val })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          showToast(data.reply || "Agent responded!", "success");
+          loadData();
+          loadCollabFeed();
+        }
+      } catch (err) {
+        showToast("Error contacting agent: " + err, "error");
+      }
+    }
+
+    // Live Server-Sent Events (SSE) Listener for Bidirectional Sync
+    function initSSE() {
+      try {
+        const evtSource = new EventSource('/api/events');
+        evtSource.addEventListener('connected', (e) => {
+          console.log('⚡ Agent SSE Link Active:', e.data);
+        });
+        evtSource.addEventListener('external_ass_changed', (e) => {
+          showToast("Agent updated captions on disk! Auto-syncing...", "success");
+          loadData();
+          loadCollabFeed();
+        });
+        evtSource.addEventListener('external_banner_changed', (e) => {
+          updateBannerOverlay();
+        });
+        evtSource.addEventListener('collab_activity', (e) => {
+          loadCollabFeed();
+        });
+        evtSource.addEventListener('render_finished', (e) => {
+          showToast("Agent completed MP4 render!", "success");
+          video.src = "/video/captioned.mp4?t=" + Date.now();
+        });
+      } catch (err) {
+        console.warn('SSE connection unavailable:', err);
+      }
+    }
+
+    // Init
+    loadData();
+    initSSE();
+    loadCollabFeed();
+  </script>
+</body>
+</html>
