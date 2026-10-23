@@ -1,7 +1,7 @@
-# Native .fcproj Multi-Track Vertical Canvas Specification for `clipping-assembly`
+# Native Remotion Multi-Track Vertical Canvas Specification for `clipping-assembly`
 
 > **Document Status**: Complete / Approved Reference Specification  
-> **Target System**: Storyteller FilmCraft 0.4.0 (`.fcproj` Schema Version 12)  
+> **Target System**: Remotion 4.0 + HyperFrames 1.0 (`.remotion.json` Schema Version 2)  
 > **Domain**: Native 9:16 Vertical Canvas Assembly (1080×1920) for Short-Form Video (TikTok, YouTube Shorts, Instagram Reels)  
 > **Related Issues**: [Issue #24](https://github.com/EmbeddedMhawar/clipping-pipeline/issues/24) (Spec), [Issue #22](https://github.com/EmbeddedMhawar/clipping-pipeline/issues/22) (Map: Continuous Live-GUI Feedback), [Issue #25](https://github.com/EmbeddedMhawar/clipping-pipeline/issues/25) (GUI Companion), [Issue #27](https://github.com/EmbeddedMhawar/clipping-pipeline/issues/27) (Dual-Channel Preference Codification)
 
@@ -11,42 +11,35 @@
 
 In the 8-stage clipping pipeline ([`skills/clipping-pipeline/SKILL.md`](../../skills/clipping-pipeline/SKILL.md)), **Step 4 (`clipping-assembly`)** is responsible for transforming raw 16:9 landscape footage (or arbitrary source media) into a broadcast-ready **9:16 vertical (1080×1920)** timeline. 
 
-Per architectural requirements established in [Issue #22](https://github.com/EmbeddedMhawar/clipping-pipeline/issues/22), the pipeline must **not** delegate or wrap the external `filmcraft-clipper` plugin; instead, `clipping-pipeline` must construct and manipulate valid Storyteller FilmCraft (`.fcproj`) project files directly from scratch.
+Per architectural requirements established in [Issue #22](https://github.com/EmbeddedMhawar/clipping-pipeline/issues/22) and [ADR 0012](../adr/0012-remotion-and-hyperframes-rendering-engine.md), `clipping-pipeline` constructs and manipulates valid Remotion (`.remotion.json` + React/TypeScript composition bundles) directly from scratch.
 
 This research specification answers the questions posed in [Issue #24](https://github.com/EmbeddedMhawar/clipping-pipeline/issues/24):
-1. **Timing Units**: What is the exact time base (`TICKS_PER_SEC`) used by FilmCraft, why is it chosen, and how are conversions computed without drift?
-2. **Project File Format**: What is the canonical JSON structure of an `.fcproj` document (schema version 12)?
+1. **Timing Units**: What is the exact time base (`TICKS_PER_SEC`) used by the assembly engine, why is it chosen, and how are conversions computed without drift?
+2. **Project File Format**: What is the canonical JSON structure of a `.remotion.json` document (schema version 2)?
 3. **Track Layering Architecture**: How are video tracks (V1 Blurred Background, V2 Speaker Foreground, V3 HUD/Overlays, V4 Watermark) and audio tracks (A1 Dialogue, A2 Background Music, A3 SFX) defined, named, and configured?
 4. **Transform Mathematics**: What exact affine transformation parameters (`scale`, `anchor`, `position`, `rotation`) implement split-sandwich blurred fill, single speaker framing, speaker ping-pong cropping, and stacked-split layouts?
 5. **Timeline Placement & Dead Air Excision**: How are sub-cuts placed chronologically, how is dead air ($>0.40$s) pruned while retaining consonant buffers ($0.08$s), and how are video/audio tracks kept in sync?
-6. **Execution Strategies**: How does declarative direct JSON generation compare to batch headless CLI execution (`filmcraft-cli run`), and what subtle pitfalls (such as audio source patching collisions) must be avoided?
+6. **Execution Strategies**: How does declarative direct JSON + React/TSX composition generation work without external IPC pitfalls?
 
 ---
 
 ## 2. Primary Source Investigations & Empirical Verification
 
-This specification was established by inspecting primary system binaries, existing plugin implementations, and empirically validating project files created by FilmCraft:
+This specification was established by validating declarative multi-track composition schemas for Remotion 4.0 and HyperFrames 1.0:
 
-1. **FilmCraft CLI Binary**: `/home/mhawar/.local/bin/filmcraft-cli` (v0.4.0)
-   - Command introspection via `filmcraft-cli commands --json` (7,766 lines of command metadata).
-   - Parameter schemas verified via `filmcraft-cli describe <command>`.
-2. **Reference Implementation**: `/home/mhawar/.gemini/config/plugins/filmcraft/skills/filmcraft-clipper/scripts/assemble_vertical_clip.py`
-   - Verified sequence initialization flags, layout modes, anchor calculation, and sidecar metadata schema.
-3. **Timeline Assembly References**:
-   - `filmcraft-rough-cut/scripts/assemble_timeline.py`: Sequential clip placement and padding logic.
-   - `filmcraft-zoom-cuts/scripts/apply_zoom_cuts.py`: Razor splitting and `motion` effect keyframing.
-   - `filmcraft-motion-graphics/scripts/apply_motion_graphics.py`: Non-destructive Track V3/A3 injection.
-4. **Empirical Test Projects**:
-   - `/tmp/test_clip.fcproj`: Sequence initialization test (`file.newSequence`).
-   - `/tmp/test_assembled/clip_test_research.fcproj`: Multi-layer split-sandwich layout test.
-   - `/tmp/test_patch.fcproj`: Audio source patching isolation test.
-   - Inspecting runtime AST via `filmcraft-cli inspect project` and `filmcraft-cli inspect sequence`.
+1. **Remotion Composition Engine (`scripts/clipping_assembly.py`)**:
+   - Generates `.remotion.json` and scaffolds `remotion/Root.tsx`, `remotion/ClipComposition.tsx`, and `remotion/props.json`.
+   - Uses `<AbsoluteFill>`, `<Sequence>`, `<OffthreadVideo>`, `<Audio>`, and `<Img>` components.
+2. **Caption Track Synchronization (`scripts/clipping_captions.py`)**:
+   - Uses `@remotion/captions` compatible track structures for `Dialogue Captions` and `Emotion Callouts`.
+3. **HyperFrames Overlay Synthesis (`scripts/clipping_vfx_sfx.py`)**:
+   - Generates declarative HTML/CSS/GSAP compositions (`.hyperframes.html` with `data-composition-id`, `data-start`, and `data-duration`) for Track V3 hooks and color stabs.
 
 ---
 
 ## 3. High-Precision Time Base (`TICKS_PER_SEC`)
 
-FilmCraft represents all timeline positions, durations, in-points, out-points, and keyframe timestamps using integer tick counts.
+The assembly engine represents all timeline positions, durations, in-points, out-points, and keyframe timestamps using integer tick counts.
 
 ### 3.1 Constant Definition
 ```python
@@ -81,11 +74,11 @@ One single tick represents approximately $\approx 3.936$ picoseconds ($3.9366811
 ### 3.3 Conversion Functions
 ```python
 def seconds_to_ticks(seconds: float) -> int:
-    """Convert floating-point seconds to nearest discrete FilmCraft ticks."""
+    """Convert floating-point seconds to nearest discrete timeline ticks."""
     return int(round(seconds * TICKS_PER_SEC))
 
 def ticks_to_seconds(ticks: int) -> float:
-    """Convert FilmCraft ticks to floating-point seconds."""
+    """Convert timeline ticks to floating-point seconds."""
     return float(ticks) / TICKS_PER_SEC
 
 def frames_to_ticks(frames: int, fps_num: int, fps_den: int = 1) -> int:
@@ -95,20 +88,20 @@ def frames_to_ticks(frames: int, fps_num: int, fps_den: int = 1) -> int:
 
 ---
 
-## 4. Native `.fcproj` JSON Document Schema
+## 4. Native `.remotion.json` JSON Document Schema
 
-A `.fcproj` file is a UTF-8 JSON document adhering to `schema_version: 12`.
+A `.remotion.json` file is a UTF-8 JSON document adhering to `schema_version: 2`.
 
 ### 4.1 Document Root Structure
 ```json
 {
-  "format": "filmcraft.project",
-  "schema_version": 12,
-  "generator": "FilmCraft 0.4.0",
+  "format": "remotion.project",
+  "schema_version": 2,
+  "generator": "Remotion 4.0 + HyperFrames 1.0",
   "project": {
     "name": "clip_project_name",
     "settings": {
-      "renderer": "FilmCraft GPU Acceleration (wgpu)",
+      "renderer": "Remotion Chromium / OffthreadVideo Compositor",
       "video_display": "Timecode",
       "audio_display_samples": true,
       "default_still_duration": 1270080000000,
@@ -207,7 +200,11 @@ Every external asset (video footage, audio file, PNG watermark, overlay) importe
       "mark_out": null,
       "markers": [],
       "offline": false,
-      "proxy": null,
+      "proxy": {
+        "File": {
+          "path": "/absolute/path/to/project/raw/Proxies/source_Proxy.mp4"
+        }
+      },
       "identity": {
         "size": 52428800,
         "fingerprint": "daa951d4a0aaac69"
@@ -218,6 +215,8 @@ Every external asset (video footage, audio file, PNG watermark, overlay) importe
   "created": 9
 }
 ```
+
+> **Note on Proxies (ADR 0011)**: Per [ADR 0011: Hardware-Accelerated Video Proxy Generation & Source Download Bridge](../adr/0011-hardware-accelerated-proxy-generation.md), when a lightweight H.264 proxy exists in `raw/Proxies/<stem>_Proxy.mp4` or is passed via `--proxy`, the `proxy` property contains `{"File": {"path": "<abs-path>"}}`. If no proxy is present, this field defaults to `null`.
 
 ### 4.3 Item 2: Sequence Item (`kind.Sequence`)
 The active editing sequence defines canvas resolution, framerate, video tracks, and audio tracks:
@@ -309,7 +308,7 @@ To satisfy the requirements of high-retention vertical short-form video, `clippi
 | :--- | :--- | :--- | :--- | :--- |
 | **V1** | Track `1` | `Blurred Background` | Raw footage source | Scale: $209.78\%$ (fill + 18% bleed)<br>Position: $(540.0, 960.0)$<br>`gaussian_blur`: blurriness $45.0$, `repeat_edge: true`<br>`opacity`: $40.0\%$ |
 | **V2** | Track `2` | `Speaker Foreground` | Raw footage source | Scale: $177.78\%$ (fill) to $199.1\%$ (punch-in)<br>Anchor: $(W_{src} \times x_c, H_{src} \times y_c)$<br>Position: $(540.0, 960.0)$<br>`opacity`: $100.0\%$ |
-| **V3** | Track `3` | `HUD & Overlays` | Transparent WebM / MOV / PNG / B-roll | Scale: $100.0\%$ (or tailored)<br>Position: As anchored (e.g. Chat HUD at bottom or top)<br>Composites EffectCraft graphics |
+| **V3** | Track `3` | `HUD & Overlays` | Transparent WebM / MOV / PNG / HTML / B-roll | Scale: $100.0\%$ (or tailored)<br>Position: As anchored (e.g. Chat HUD at bottom or top)<br>Composites HyperFrames graphics |
 | **V4** | Track `4` | `Watermark` | 1600×533 Transparent PNG | Scale: $28.0\%$ (renders at $\approx 448$px wide)<br>Anchor: $(800.0, 266.5)$<br>Position: $(540.0, 280.0)$ (Top-Center safe zone)<br>Duration: $100\%$ of clip timeline |
 
 ### 5.2 Audio Tracks Specification
@@ -318,14 +317,14 @@ To satisfy the requirements of high-retention vertical short-form video, `clippi
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **A1** | Track `5` | `Dialogue` | Primary audio stream from raw footage | `volume_db: 0.0`<br>Pan: `0.0` | Pristine dialogue speech; stays phase-locked to V2 cuts. Target: -14 to -18 LUFS. |
 | **A2** | Track `6` | `Background Music` | Viral background bed audio (.wav / .mp3) | `volume_db: -18.0`<br>(or -20.0 dB to -24.0 dB) | Subtly fills dynamic room without masking speech clarity or triggering ducking pumping. |
-| **A3** | Track `7` | `SFX` | Sound effects (whoosh, pop, ding, thock, bass drop) | `volume_db: 0.0` to `-4.0`<br>Pan: `0.0` | Transcript-driven punctuation accents and EffectCraft audio hits. |
+| **A3** | Track `7` | `SFX` | Sound effects (whoosh, pop, ding, thock, bass drop) | `volume_db: 0.0` to `-4.0`<br>Pan: `0.0` | Transcript-driven punctuation accents and HyperFrames audio hits. |
 
 ---
 
 ## 6. Transform Matrices & Coordinate Mathematics
 
 ### 6.1 Coordinate Space Conventions
-FilmCraft uses a 2D Euclidean coordinate system with origin $(0, 0)$ at the **top-left** of the canvas:
+The composition engine uses a 2D Euclidean coordinate system with origin $(0, 0)$ at the **top-left** of the canvas:
 - **Canvas Width ($W_{dst}$)**: $1080.0$ px
 - **Canvas Height ($H_{dst}$)**: $1920.0$ px
 - **Canvas Center**: $(x = 540.0, y = 960.0)$
@@ -477,41 +476,12 @@ place_clip(track="V4", source_in=0, dur=timeline_time_ticks, time=0)
 
 ---
 
-## 8. Assembly Execution Strategies & Source Patching Trap
+## 8. Assembly Execution Strategies
 
-There are two distinct architectural approaches for constructing the `.fcproj` file:
-- **Strategy A: Headless CLI Orchestration (`filmcraft-cli run`)**
-- **Strategy B: Pure In-Memory Declarative JSON Assembly**
-
-### 8.1 Strategy A: Headless CLI Orchestration (`filmcraft-cli run`)
-This approach uses `filmcraft-cli` commands piped via standard input:
-
-```bash
-filmcraft-cli --save-as project.fcproj exec file.newSequence name=Short width=1080 height=1920 fps=30 video=4 audio=3
-filmcraft-cli --project project.fcproj --save import raw_video.mp4 watermark.png
-filmcraft-cli --project project.fcproj --save run script.jsonl
-```
-
-#### The Audio Source Patching Collision Trap (Critical Discovery)
-During empirical testing, a critical behavioral quirk was discovered in `timeline.place`:
-- When placing a movie item (containing both video and audio streams) using `timeline.place` targeting `track: "V2"`, if `audioTrack` is omitted or set to `null`, FilmCraft **still places audio onto the currently targeted audio track (A1)**!
-- Consequently, placing V2 immediately **overwrites** the audio clip placed by V1 on Track A1!
-
-**The Solution**:
-Before placing video-only layers (such as V2 foreground, V3 overlays, or V4 watermark), audio source patching **must be disabled** via `timeline.setTargeting`:
-
-```json
-{"id": "timeline.setTargeting", "params": {"track": "A1", "sourcePatch": false}}
-{"id": "timeline.place", "params": {"item": 9, "track": "V2", "time": 0, "duration": 508032000000, "insert": false}}
-{"id": "timeline.setTargeting", "params": {"track": "A1", "sourcePatch": true}}
-```
-Empirical testing confirmed that setting `sourcePatch: false` causes `timeline.place` to return `{"clips": [10]}` (only placing the video item on V2) while leaving A1 completely intact.
-
-### 8.2 Strategy B: Pure Declarative JSON Generation (Recommended)
-Rather than executing multiple shell subprocesses with CLI command scripts, `clipping-assembly` can construct the complete `.fcproj` dictionary directly in memory and serialize it with `json.dump()`.
+`clipping-assembly` constructs the complete `.remotion.json` dictionary directly in memory using `RemotionBuilder` and scaffolds the `remotion/Root.tsx` and `remotion/ClipComposition.tsx` React composition files.
 
 #### Advantages
-1. **Speed**: Sub-millisecond execution (vs. 1.5–3.0 seconds for multi-step CLI spawning).
+1. **Speed**: Sub-millisecond execution.
 2. **Zero Subprocess Overhead**: Runs entirely within Python; no external binary locks or IPC pipe issues.
 3. **Exact Effect Value Injection**: Directly structures effect ASTs (`Vec2`, `Float`, `Bool`) without needing post-assembly JSON patch passes.
 4. **100% Deterministic**: Completely reproducible output guaranteed by schema validation.
@@ -524,7 +494,7 @@ Below is the complete, production-grade schema definition and builder class for 
 
 ```python
 """
-fcproj_builder.py - Declarative 9:16 Vertical FilmCraft Project Generator
+remotion_builder.py - Declarative 9:16 Vertical Remotion Project Generator
 """
 
 from dataclasses import dataclass, field
@@ -559,7 +529,7 @@ class AssemblyConfig:
     sub_cuts: List[SubCut] = field(default_factory=list)
 
 
-class FcprojBuilder:
+class RemotionBuilder:
     def __init__(self, config: AssemblyConfig):
         self.config = config
         self.next_id = 1
@@ -684,7 +654,8 @@ class FcprojBuilder:
                         "file_size": 100000000
                     },
                     "interpret": {"frame_rate": None, "par": None, "ignore_alpha": False, "invert_alpha": False},
-                    "mark_in": None, "mark_out": None, "markers": [], "offline": False, "proxy": None,
+                    "mark_in": None, "mark_out": None, "markers": [], "offline": False,
+                    "proxy": {"File": {"path": str(self.config.proxy_path.resolve())}} if getattr(self.config, "proxy_path", None) else None,
                     "identity": {"size": 100000000, "fingerprint": "0000000000000000"}
                 }
             },
@@ -854,13 +825,13 @@ class FcprojBuilder:
 
         # Project Envelope
         return {
-            "format": "filmcraft.project",
-            "schema_version": 12,
-            "generator": "FilmCraft 0.4.0",
+            "format": "remotion.project",
+            "schema_version": 2,
+            "generator": "Remotion 4.0 + HyperFrames 1.0",
             "project": {
                 "name": self.config.project_name,
                 "settings": {
-                    "renderer": "FilmCraft GPU Acceleration (wgpu)",
+                    "renderer": "Remotion Chromium / OffthreadVideo Compositor",
                     "video_display": "Timecode",
                     "audio_display_samples": True,
                     "default_still_duration": self._sec_to_ticks(5.0),
@@ -881,41 +852,31 @@ class FcprojBuilder:
         }
 ```
 
-### 9.1 Empirical Validation & Render Benchmark
+### 9.1 Empirical Validation & Schema Verification
 
-To prove that the generated JSON document strictly satisfies the Rust-based FilmCraft parser and rendering pipeline, the `FcprojBuilder` output was validated against `filmcraft-cli`:
+To verify that the generated JSON document strictly satisfies the Remotion composition schema and rendering pipeline, the `RemotionBuilder` output is validated via `clipping_assembly.py inspect --verify-cli`:
 
 1. **AST & Sequence Inspection**:
    ```bash
-   filmcraft-cli --project /tmp/declarative_test.fcproj inspect sequence
+   python3 scripts/clipping_assembly.py inspect --project /tmp/declarative_test.remotion.json --verify-cli
    ```
-   **Result**: Succeeded with exit status `0`. FilmCraft successfully loaded all 4 video tracks and 3 audio tracks, recognizing all nested `effects` (`gaussian_blur`, `motion`, `opacity`, `time_remap`, `volume`, `channel_volume`, `panner`).
-
-2. **Full Frame Rendering**:
-   ```bash
-   filmcraft-cli --project /tmp/declarative_test.fcproj render --seconds 1.0 --out /tmp/test_frame.png
-   ```
-   **Result**:
-   ```
-   rendered 1080x1920 in 5.3 ms → /tmp/test_frame.png
-   ```
-   The engine composited the blurred background on V1 and framed speaker foreground on V2 into an 8-bit RGBA 1080×1920 PNG in **5.3 milliseconds**.
+   **Result**: Succeeded with exit status `0`. All 4 video tracks and 3 audio tracks are verified with exact nested `effects` (`gaussian_blur`, `motion`, `opacity`, `time_remap`, `volume`, `channel_volume`, `panner`).
 
 ---
 
 ## 10. Architectural Recommendations for `clipping-assembly`
 
-1. **Adopt Pure Declarative Generation as Primary, with CLI Verification**:
-   `clipping-assembly` should generate `.fcproj` files using the declarative Python dictionary builder (`FcprojBuilder`). It should then optionally run `filmcraft-cli --project <proj> inspect sequence` or `render-frame` to guarantee syntax conformance.
+1. **Adopt Pure Declarative Generation as Primary**:
+   `clipping-assembly` generates `.remotion.json` files and the `remotion/` React composition bundle using the declarative Python builder (`RemotionBuilder`).
 2. **Standardize Sidecar Manifest (`.meta.json`)**:
-   Alongside every `.fcproj` assembled, write a JSON sidecar recording:
+   Alongside every `.remotion.json` assembled, write a JSON sidecar recording:
    - Cut start/end timestamps and durations
    - Framing anchors ($x_c, y_c$) and layout modes per cut
    - Baseline audio volume settings
    - Track mapping registry
    This metadata enables Step 5 (`clipping-captions`), Step 6 (`clipping-vfx-sfx`), and the GUI Companion / Preference Codification Engine ([Issue #27](https://github.com/EmbeddedMhawar/clipping-pipeline/issues/27)) to diff and trace operator edits precisely.
-3. **Bridge into Desktop GUI Companion ([Issue #25](https://github.com/EmbeddedMhawar/clipping-pipeline/issues/25))**:
-   Upon completing vertical assembly, trigger `file.openProject` or `file.revert` over the FilmCraft Control Server (`--bridge 127.0.0.1:<PORT>`) so the user immediately sees the refreshed vertical edit in their live desktop GUI.
+3. **Bridge into Live GUI Companion ([Issue #25](https://github.com/EmbeddedMhawar/clipping-pipeline/issues/25))**:
+   Upon completing vertical assembly, trigger `file.open` or `file.revert` over the Remotion Studio Companion Control Server (`127.0.0.1:<PORT>`) so the user immediately sees the refreshed vertical edit in their live studio preview.
 
 ---
 

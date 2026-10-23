@@ -9,7 +9,7 @@ Accepted
 ## Considered Options
 
 - **Loose workspace skills in `.agents/skills`**: Project-specific copy-pasting. Rejected because updates cannot propagate to other video projects.
-- **Monolithic integration into `filmcraft` plugin**: Embedding within FilmCraft. Rejected to keep the clipping state engine decoupled from specific NLE editors.
+- **Monolithic integration into a single video editor plugin**: Embedding within a specific desktop NLE plugin. Rejected to keep the clipping state engine decoupled and portable.
 - **Dedicated plugin repository**: Standalone version control, shared global discovery, and portable execution across any directory.
 
 ## Consequences
