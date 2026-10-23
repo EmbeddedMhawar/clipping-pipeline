@@ -88,6 +88,15 @@ python3 scripts/clipping_state.py validate --step clipping-transcription --dir <
 ```
 Exit code `0` confirms the gate is unblocked.
 
+### 6. Post-Step Summary & Conversation Handoff
+Following approval:
+1. Concisely summarize what was completed (ingested rules, applied Cole Corcoran defaults, initialized step configuration slices).
+2. Instruct the user to open a new conversation to run Step 2 (`clipping-transcription`).
+3. Provide the exact copy-paste prompt formatted as:
+   ```text
+   Campaign: <Campaign Title> (<campaign-slug>) proceed with Step 2 (clipping-transcription)
+   ```
+
 ---
 
 ## Completion Criteria

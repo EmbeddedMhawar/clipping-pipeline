@@ -11,7 +11,7 @@ Verifies:
 - Blocked downstream approval when checkpoint is pending review
 - Successful approval after chat feedback registration or acknowledgment
 - Preference engine invocation on chat directives (Channel 1)
-- Preference engine invocation on manual FilmCraft saves / project diffing (Channel 2)
+- Preference engine invocation on manual Remotion Studio saves / project diffing (Channel 2)
 - Auto-approve lifecycle transitions
 - GUI companion synchronization (health check, timeline reload, watcher tracking)
 """
@@ -28,7 +28,7 @@ from pathlib import Path
 
 from scripts.gui_companion import (
     DEFAULT_FLAG_FILENAME,
-    MockFilmCraftServer,
+    MockRemotionServer,
     TICKS_PER_SECOND,
 )
 from scripts.clipping_preferences import (
@@ -95,7 +95,7 @@ class TestClippingCheckpointGate(unittest.TestCase):
         self.run_cli(["ingest-brief", "--brief", str(brief_file), "--dir", str(self.project_dir)], check=True)
         self.run_cli(["approve", "--step", "clipping-guidelines", "--dir", str(self.project_dir)], check=True)
 
-    def _create_mock_fcproj(
+    def _create_mock_remotion_project(
         self,
         bgm_vol: float = -20.0,
         sfx_vol: float = -2.0,
@@ -105,10 +105,10 @@ class TestClippingCheckpointGate(unittest.TestCase):
         blur: float = 45.0,
         watermark_scale: float = 28.0,
     ) -> dict:
-        """Create mock .fcproj dictionary for diffing and companion inspection."""
+        """Create mock .remotion.json dictionary for diffing and companion inspection."""
         from scripts.clipping_preferences import TestClippingPreferences
         helper = TestClippingPreferences()
-        return helper._create_mock_fcproj(
+        return helper._create_mock_remotion_project(
             bgm_vol=bgm_vol,
             sfx_vol=sfx_vol,
             speaker_anchor=speaker_anchor,
@@ -327,15 +327,15 @@ class TestClippingCheckpointGate(unittest.TestCase):
         self.assertEqual(state["current_step"], "clipping-hook-hunter")
 
     def test_save_detection_and_project_diffing_on_flag_file(self):
-        """Verify manual FilmCraft save (.gui_companion_saved.flag) triggers project diffing."""
+        """Verify manual Remotion Studio save (.gui_companion_saved.flag) triggers project diffing."""
         self._init_and_approve_guidelines()
 
         # Create baseline and modified user project
-        base_data = self._create_mock_fcproj(bgm_vol=-20.0, sfx_vol=-2.0, speaker_anchor=(960.0, 540.0))
-        user_data = self._create_mock_fcproj(bgm_vol=-25.0, sfx_vol=-6.0, speaker_anchor=(480.0, 486.0))  # shifted left
+        base_data = self._create_mock_remotion_project(bgm_vol=-20.0, sfx_vol=-2.0, speaker_anchor=(960.0, 540.0))
+        user_data = self._create_mock_remotion_project(bgm_vol=-25.0, sfx_vol=-6.0, speaker_anchor=(480.0, 486.0))  # shifted left
 
-        base_file = self.project_dir / "baseline.fcproj"
-        user_file = self.project_dir / "test_clip.fcproj"
+        base_file = self.project_dir / "baseline.remotion.json"
+        user_file = self.project_dir / "test_clip.remotion.json"
         with open(base_file, "w", encoding="utf-8") as f:
             json.dump(base_data, f)
         with open(user_file, "w", encoding="utf-8") as f:
@@ -377,11 +377,11 @@ class TestClippingCheckpointGate(unittest.TestCase):
         """Verify --diff-project explicitly forces differential comparison."""
         self._init_and_approve_guidelines()
 
-        base_data = self._create_mock_fcproj(scale=177.78)
-        user_data = self._create_mock_fcproj(scale=210.00)
+        base_data = self._create_mock_remotion_project(scale=177.78)
+        user_data = self._create_mock_remotion_project(scale=210.00)
 
-        base_file = self.project_dir / "baseline.fcproj"
-        user_file = self.project_dir / "test_clip.fcproj"
+        base_file = self.project_dir / "baseline.remotion.json"
+        user_file = self.project_dir / "test_clip.remotion.json"
         with open(base_file, "w", encoding="utf-8") as f:
             json.dump(base_data, f)
         with open(user_file, "w", encoding="utf-8") as f:
@@ -412,16 +412,16 @@ class TestClippingCheckpointGate(unittest.TestCase):
         """Verify checkpoint synchronizes with active GUI companion and triggers timeline reload."""
         self._init_and_approve_guidelines()
 
-        # Start mock FilmCraft server on random port
-        mock_server = MockFilmCraftServer(port=0)
+        # Start mock Remotion server on random port
+        mock_server = MockRemotionServer(port=0)
         mock_server.start()
         mock_server.ready_event.wait(timeout=2.0)
         server_port = mock_server.port
 
         try:
             # Create project file
-            user_data = self._create_mock_fcproj()
-            user_file = self.project_dir / "test_clip.fcproj"
+            user_data = self._create_mock_remotion_project()
+            user_file = self.project_dir / "test_clip.remotion.json"
             with open(user_file, "w", encoding="utf-8") as f:
                 json.dump(user_data, f)
 

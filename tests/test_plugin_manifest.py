@@ -92,7 +92,13 @@ class TestPluginManifest(unittest.TestCase):
             "clipping-guidelines",
             "clipping-channels",
             "clipping-assembly",
+            "clipping-captions",
+            "clipping-vfx-sfx",
+            "clipping-qc-packager",
             "clipping-publisher",
+            "remotion-best-practices",
+            "hyperframes",
+            "hyperframes-cli",
         ]
         for skill in expected_skills:
             skill_dir = self.repo_root / "skills" / skill

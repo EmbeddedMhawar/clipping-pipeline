@@ -19,7 +19,7 @@ Features:
      consonant cut padding, and watermark options.
 
 3. Channel 2 (Project Diffing Heuristic):
-   - Differential analysis comparing user-modified .fcproj files against
+   - Differential analysis comparing user-modified .remotion.json files against
      agent-generated baselines to detect timeline item modifications,
      speaker framing anchors (x_c, y_c), consonant padding trims, track volume
      overrides, blur/opacity values, and watermark styling.
@@ -140,12 +140,12 @@ COLOR_NAME_MAP: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 def seconds_to_ticks(seconds: float) -> int:
-    """Convert floating-point seconds to FilmCraft discrete ticks."""
+    """Convert floating-point seconds to discrete timeline ticks."""
     return int(round(seconds * TICKS_PER_SEC))
 
 
 def ticks_to_seconds(ticks: int) -> float:
-    """Convert FilmCraft discrete ticks to floating-point seconds."""
+    """Convert discrete timeline ticks to floating-point seconds."""
     return float(ticks) / TICKS_PER_SEC
 
 
@@ -681,6 +681,18 @@ def parse_feedback_directives(text: str) -> Tuple[List[Dict[str, Any]], Dict[str
         })
         set_nested(proposed_preferences, "framing.punch_in_scale", scale_val)
 
+    # 4b. Punch-outs / Unzooms / Blurry Background
+    # Examples: "punchout", "zoom out with blurry background", "punch out on reactions", "unzoom"
+    if re.search(r"\b(?:punch[- ]?outs?|zoom[- ]?outs?|unzooms?|(?:zoom\s*out\s*with\s*blurry\s*background))\b", lower_text):
+        directives.append({
+            "directive": "punch_out_toggle",
+            "raw_match": "punchout / zoom out with blurry background",
+            "key": "framing.punch_out_enabled",
+            "value": True,
+            "explanation": "Enabled punch-out / unzoom to full landscape width with blurred background for dual-reactions and wide shots",
+        })
+        set_nested(proposed_preferences, "framing.punch_out_enabled", True)
+
     # 5. Caption Words Per Line & Geometry
     # Examples: "2 words per line", "1 word at a time", "one word per line", "max 2 lines"
     wpl_match = re.search(r"\b(\d+)\s*(?:words?\s*per\s*line|wpl)\b", lower_text)
@@ -909,11 +921,11 @@ def parse_feedback_directives(text: str) -> Tuple[List[Dict[str, Any]], Dict[str
 
 
 # ---------------------------------------------------------------------------
-# Channel 2: Project Diffing Heuristic (.fcproj)
+# Channel 2: Project Diffing Heuristic (.remotion.json)
 # ---------------------------------------------------------------------------
 
-def _find_sequence_in_fcproj(doc: Dict[str, Any]) -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
-    """Extract the active sequence from an .fcproj document."""
+def _find_sequence_in_project(doc: Dict[str, Any]) -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
+    """Extract the active sequence from a .remotion.json document."""
     items = doc.get("project", {}).get("items", {})
     view_active = doc.get("view", {}).get("active_sequence")
     if view_active is not None and str(view_active) in items:
@@ -940,6 +952,17 @@ def _find_track_by_name(tracks: List[Dict[str, Any]], name: str) -> Optional[Dic
     return None
 
 
+def _to_xy_list(val: Any, default_x: float, default_y: float) -> List[float]:
+    """Helper to normalize Vec2 AST dict or list into [x, y]."""
+    if isinstance(val, dict) and "Vec2" in val:
+        val = val["Vec2"]
+    if isinstance(val, dict) and "x" in val and "y" in val:
+        return [float(val["x"]), float(val["y"])]
+    if isinstance(val, (list, tuple)) and len(val) >= 2:
+        return [float(val[0]), float(val[1])]
+    return [float(default_x), float(default_y)]
+
+
 def _extract_motion_effect_params(clip: Dict[str, Any]) -> Dict[str, Any]:
     """Extract scale, position, and anchor from a clip's motion effect."""
     effects = clip.get("effects", [])
@@ -950,10 +973,10 @@ def _extract_motion_effect_params(clip: Dict[str, Any]) -> Dict[str, Any]:
             scale = scale_raw.get("Float", 100.0) if isinstance(scale_raw, dict) else 100.0
 
             pos_raw = params.get("position", {}).get("value", {})
-            position = pos_raw.get("Vec2", [CANVAS_CENTER_X, CANVAS_CENTER_Y]) if isinstance(pos_raw, dict) else [CANVAS_CENTER_X, CANVAS_CENTER_Y]
+            position = _to_xy_list(pos_raw, CANVAS_CENTER_X, CANVAS_CENTER_Y)
 
             anchor_raw = params.get("anchor", {}).get("value", {})
-            anchor = anchor_raw.get("Vec2", [960.0, 540.0]) if isinstance(anchor_raw, dict) else [960.0, 540.0]
+            anchor = _to_xy_list(anchor_raw, 960.0, 540.0)
 
             return {"scale": scale, "position": position, "anchor": anchor, "enabled": eff.get("enabled", True)}
     return {}
@@ -983,7 +1006,7 @@ def _extract_opacity_effect_params(clip: Dict[str, Any]) -> Dict[str, Any]:
 
 def diff_project_heuristic(baseline_path: Path, user_edit_path: Path) -> Dict[str, Any]:
     """
-    Compares a user-modified .fcproj file against an agent-generated baseline.
+    Compares a user-modified .remotion.json file against an agent-generated baseline.
     Detects:
     1. Audio track volume adjustments (Dialogue, BGM, SFX)
     2. Speaker foreground framing anchor shifts (x_c, y_c) and scale
@@ -1002,11 +1025,11 @@ def diff_project_heuristic(baseline_path: Path, user_edit_path: Path) -> Dict[st
     if not base_doc or not user_doc:
         raise ValueError("Could not load baseline or user project file as valid JSON")
 
-    _, base_seq = _find_sequence_in_fcproj(base_doc)
-    _, user_seq = _find_sequence_in_fcproj(user_doc)
+    _, base_seq = _find_sequence_in_project(base_doc)
+    _, user_seq = _find_sequence_in_project(user_doc)
 
     if not base_seq or not user_seq:
-        raise ValueError("Could not locate active sequence in both .fcproj projects")
+        raise ValueError("Could not locate active sequence in both .remotion.json projects")
 
     differences: List[Dict[str, Any]] = []
     codified_preferences: Dict[str, Any] = {}
@@ -1145,6 +1168,47 @@ def diff_project_heuristic(baseline_path: Path, user_edit_path: Path) -> Dict[st
                         "codified_value": max_u,
                     })
                     set_nested(codified_preferences, "framing.punch_in_scale", max_u)
+
+            # Punch-out (unzoom) detection: scale < 100.0 (e.g. 70-85% for graphic overlays)
+            u_unzooms = [s for s in u_scales if s < 100.0]
+            b_unzooms = [s for s in b_scales if s < 100.0]
+            if u_unzooms and not b_unzooms:
+                avg_unzoom = round(sum(u_unzooms) / len(u_unzooms), 1)
+                differences.append({
+                    "category": "framing",
+                    "description": f"User introduced punch-outs / unzooms for graphics/overlays with avg scale {avg_unzoom}%",
+                    "baseline_value": False,
+                    "user_value": True,
+                    "codified_preference_key": "framing.punch_out_enabled",
+                    "codified_value": True,
+                })
+                set_nested(codified_preferences, "framing.punch_out_enabled", True)
+                set_nested(codified_preferences, "framing.punch_out_scale", avg_unzoom)
+            elif u_unzooms and b_unzooms:
+                avg_u = round(sum(u_unzooms) / len(u_unzooms), 1)
+                avg_b = round(sum(b_unzooms) / len(b_unzooms), 1)
+                if abs(avg_u - avg_b) > 2.0:
+                    differences.append({
+                        "category": "framing",
+                        "description": f"Punch-out unzoom scale tuned from {avg_b}% to {avg_u}%",
+                        "baseline_value": avg_b,
+                        "user_value": avg_u,
+                        "codified_preference_key": "framing.punch_out_scale",
+                        "codified_value": avg_u,
+                    })
+                    set_nested(codified_preferences, "framing.punch_out_scale", avg_u)
+
+            # Visual cut frequency / Razor cutting
+            if len(user_v2_items) != len(base_v2_items):
+                differences.append({
+                    "category": "timeline",
+                    "description": f"Speaker Foreground clips count adjusted from {len(base_v2_items)} to {len(user_v2_items)} (visual camera angle reframing)",
+                    "baseline_value": len(base_v2_items),
+                    "user_value": len(user_v2_items),
+                    "codified_preference_key": "timeline.visual_shot_cutting",
+                    "codified_value": True,
+                })
+                set_nested(codified_preferences, "timeline.visual_shot_cutting", True)
 
     # -----------------------------------------------------------------------
     # 3. Background Blur & Opacity (Track V1)
@@ -1633,7 +1697,7 @@ class TestClippingPreferences(unittest.TestCase):
         self.assertEqual(get_nested(prefs, "timeline.consonant_padding_seconds"), 0.12)
         self.assertEqual(get_nested(prefs, "timeline.silence_threshold_seconds"), 0.35)
 
-    def _create_mock_fcproj(
+    def _create_mock_remotion_project(
         self,
         bgm_vol: float = -20.0,
         sfx_vol: float = -2.0,
@@ -1644,7 +1708,7 @@ class TestClippingPreferences(unittest.TestCase):
         watermark_scale: float = 28.0,
         clip_dur_sec: float = 10.0,
     ) -> Dict[str, Any]:
-        """Helper to create minimal valid .fcproj AST for diff testing."""
+        """Helper to create minimal valid .remotion.json AST for diff testing."""
         dur_ticks = seconds_to_ticks(clip_dur_sec)
 
         v1_item = {
@@ -1726,22 +1790,22 @@ class TestClippingPreferences(unittest.TestCase):
         }
 
         return {
-            "format": "filmcraft.project",
-            "schema_version": 12,
+            "format": "remotion.project",
+            "schema_version": 2,
             "project": {"items": {"8": {"kind": {"Sequence": seq}}}},
             "view": {"active_sequence": 8},
         }
 
     def test_channel_2_project_diffing_heuristic(self):
         """Verify Channel 2 diffing extracts track volume, anchor, blur, and timeline modifications."""
-        baseline_data = self._create_mock_fcproj(
+        baseline_data = self._create_mock_remotion_project(
             bgm_vol=-20.0,
             sfx_vol=-2.0,
             speaker_anchor=(960.0, 540.0),
             blur=45.0,
             clip_dur_sec=20.0,
         )
-        user_data = self._create_mock_fcproj(
+        user_data = self._create_mock_remotion_project(
             bgm_vol=-24.0,
             sfx_vol=-6.0,
             speaker_anchor=(480.0, 486.0),  # x_c=0.25, y_c=0.45 (Host framing)
@@ -1750,8 +1814,8 @@ class TestClippingPreferences(unittest.TestCase):
             clip_dur_sec=16.0,  # Duration trimmed from 20s to 16s
         )
 
-        base_file = self.project_dir / "baseline.fcproj"
-        user_file = self.project_dir / "user_edit.fcproj"
+        base_file = self.project_dir / "baseline.remotion.json"
+        user_file = self.project_dir / "user_edit.remotion.json"
         save_json_file(base_file, baseline_data)
         save_json_file(user_file, user_data)
 
@@ -1839,9 +1903,9 @@ def main() -> int:
     fb_p.add_argument("--json", action="store_true", help="Output JSON response")
 
     # diff-project
-    diff_p = subparsers.add_parser("diff-project", help="Channel 2: Heuristic diffing between baseline and user .fcproj")
-    diff_p.add_argument("--baseline", "-b", required=True, help="Path to agent-generated baseline .fcproj")
-    diff_p.add_argument("--user-edit", "-u", required=True, help="Path to user-saved .fcproj")
+    diff_p = subparsers.add_parser("diff-project", help="Channel 2: Heuristic diffing between baseline and user .remotion.json")
+    diff_p.add_argument("--baseline", "-b", required=True, help="Path to agent-generated baseline .remotion.json")
+    diff_p.add_argument("--user-edit", "-u", required=True, help="Path to user-saved .remotion.json")
     diff_p.add_argument("--project-dir", "-p", default=None, help="Project directory")
     diff_p.add_argument("--scope", "-s", choices=["project", "global"], default="project", help="Scope to save into")
     diff_p.add_argument("--save", action="store_true", help="Persist codified preferences into specified scope")

@@ -161,10 +161,14 @@ def _resolve_channels_path(
     cand_parent = base.parent / CHANNELS_FILENAME
     if cand_parent.is_file():
         return cand_parent
-    # 3. Current working directory
-    cand_cwd = Path.cwd() / CHANNELS_FILENAME
-    if cand_cwd.is_file():
-        return cand_cwd
+    # 3. Current working directory (only if project_dir is inside cwd)
+    try:
+        base.resolve().relative_to(Path.cwd().resolve())
+        cand_cwd = Path.cwd() / CHANNELS_FILENAME
+        if cand_cwd.is_file():
+            return cand_cwd
+    except ValueError:
+        pass
     return None
 
 
@@ -310,6 +314,9 @@ def cmd_ingest_brief(args: argparse.Namespace) -> int:
         "media_audio_path": brief.get("transcription", {}).get(
             "media_audio_path", f"raw/{project}_audio.wav"
         ),
+        "media_proxy_path": brief.get("transcription", {}).get(
+            "media_proxy_path", f"raw/Proxies/{project}_Proxy.mp4"
+        ),
         "sample_rate": brief.get("transcription", {}).get("sample_rate", 48000),
         "phonetic_dictionary": brief.get("transcription", {}).get(
             "phonetic_dictionary", {}
@@ -336,6 +343,9 @@ def cmd_ingest_brief(args: argparse.Namespace) -> int:
     assembly_slice = {
         "canvas": {"width": 1080, "height": 1920, "aspect": "9:16"},
         "layout": brief.get("assembly", {}).get("layout", "smart-center"),
+        "proxy_path": brief.get("assembly", {}).get(
+            "proxy_path", f"raw/Proxies/{project}_Proxy.mp4"
+        ),
         "speaker_x_anchors": brief.get("assembly", {}).get(
             "speaker_x_anchors", {}
         ),
@@ -531,11 +541,24 @@ def cmd_approve(args: argparse.Namespace) -> int:
 
     # Advance current_step if applicable
     current_idx = PIPELINE_STEPS.index(step_name)
+    next_step = None
+    next_step_num = None
     if current_idx + 1 < len(PIPELINE_STEPS):
-        state["current_step"] = PIPELINE_STEPS[current_idx + 1]
+        next_step = PIPELINE_STEPS[current_idx + 1]
+        next_step_num = current_idx + 2
+        state["current_step"] = next_step
 
     _save_state(state_path, state)
     print(f"Approved step '{step_name}'. Guidelines approved: {state.get('guidelines_approved')}")
+
+    if next_step and next_step_num:
+        campaign_info = state.get("campaign", {})
+        camp_title = campaign_info.get("title") or "Campaign"
+        camp_slug = campaign_info.get("project") or campaign_info.get("slug") or "campaign-slug"
+        print(
+            f"\nNext step prompt for new conversation:\n"
+            f"Campaign: {camp_title} ({camp_slug}) proceed with Step {next_step_num} ({next_step})"
+        )
     return 0
 
 
@@ -689,7 +712,7 @@ def _generate_review_artifact(
     lines.extend([
         "",
         "## Operator Action Guidance",
-        "1. **Inspect Timeline in FilmCraft**:",
+        "1. **Inspect Timeline in Remotion Studio**:",
         "   ```bash",
         "   python3 scripts/gui_companion.py seek --seconds 0.0",
         "   python3 scripts/gui_companion.py play",
@@ -748,8 +771,8 @@ def cmd_checkpoint(args: argparse.Namespace) -> int:
         or (step_data.get("checkpoint", {}).get("staged") is True)
     )
 
-    existing_fcproj = list(project_dir.glob("*.fcproj"))
-    has_execution_data = is_completed_or_staged or bool(existing_fcproj)
+    existing_projects = list(project_dir.glob("*.remotion.json"))
+    has_execution_data = is_completed_or_staged or bool(existing_projects)
 
     if not has_execution_data and not getattr(args, "force", False):
         sys.stderr.write(
@@ -769,19 +792,19 @@ def cmd_checkpoint(args: argparse.Namespace) -> int:
     if not project_file:
         proj_name = state.get("campaign", {}).get("project")
         if proj_name:
-            cand = project_dir / f"{proj_name}.fcproj"
+            cand = project_dir / f"{proj_name}.remotion.json"
             if cand.is_file():
                 project_file = cand
         if not project_file:
             candidates = [
                 p
-                for p in project_dir.glob("*.fcproj")
-                if not p.name.startswith("baseline_") and p.name != "baseline.fcproj"
+                for p in project_dir.glob("*.remotion.json")
+                if not p.name.startswith("baseline_") and p.name != "baseline.remotion.json"
             ]
             if candidates:
                 project_file = candidates[0]
-            elif existing_fcproj:
-                project_file = existing_fcproj[0]
+            elif existing_projects:
+                project_file = existing_projects[0]
 
     # Resolve or initialize baseline file
     baseline_file: Optional[Path] = None
@@ -793,8 +816,8 @@ def cmd_checkpoint(args: argparse.Namespace) -> int:
         cand_base = project_dir / f"baseline_{project_file.name}"
         if cand_base.is_file():
             baseline_file = cand_base
-        elif (project_dir / "baseline.fcproj").is_file():
-            baseline_file = project_dir / "baseline.fcproj"
+        elif (project_dir / "baseline.remotion.json").is_file():
+            baseline_file = project_dir / "baseline.remotion.json"
         else:
             baseline_file = cand_base
             try:
@@ -804,7 +827,7 @@ def cmd_checkpoint(args: argparse.Namespace) -> int:
 
     # b) Companion sync: queries scripts/gui_companion.py status.
     # If GUI companion is active and project exists, triggers gui_companion.py reload
-    # to refresh the timeline in FilmCraft, and starts/checks project file watcher.
+    # to refresh the timeline in Remotion Studio, and starts/checks project file watcher.
     companion_status: Dict[str, Any] = {"active": False, "connected": False}
     try:
         health = gui_companion.check_health(base_dir=project_dir, timeout=1.0)
@@ -840,7 +863,7 @@ def cmd_checkpoint(args: argparse.Namespace) -> int:
     except Exception as e:
         companion_status["error"] = str(e)
 
-    # c) Save detection / diffing: if the operator saved manual changes in FilmCraft
+    # c) Save detection / diffing: if the operator saved manual changes in Remotion Studio
     # (detected via .gui_companion_saved.flag or mtime diff), automatically runs
     # scripts/clipping_preferences.py diff-project against the agent baseline and saves learned preferences.
     flag_file = project_dir / gui_companion.DEFAULT_FLAG_FILENAME
@@ -887,7 +910,7 @@ def cmd_checkpoint(args: argparse.Namespace) -> int:
                 for k, v in clipping_preferences.flatten_dict(codified).items():
                     pref_store.set(k, v, scope="project")
                 print(
-                    f"[Checkpoint Diff] Codified {len(diff_results.get('differences', []))} preferences from FilmCraft edit into .clipping_preferences.json"
+                    f"[Checkpoint Diff] Codified {len(diff_results.get('differences', []))} preferences from Remotion project edit into .clipping_preferences.json"
                 )
             if flag_file.is_file():
                 flag_file.unlink(missing_ok=True)
@@ -1151,7 +1174,7 @@ def main() -> None:
     p_checkpoint.add_argument(
         "--diff-project",
         action="store_true",
-        help="Force differential analysis between baseline and user .fcproj",
+        help="Force differential analysis between baseline and user .remotion.json",
     )
     p_checkpoint.add_argument(
         "--auto-approve",
@@ -1161,12 +1184,12 @@ def main() -> None:
     p_checkpoint.add_argument(
         "--project-file",
         default=None,
-        help="Path to user/active .fcproj file (optional)",
+        help="Path to user/active .remotion.json file (optional)",
     )
     p_checkpoint.add_argument(
         "--baseline-file",
         default=None,
-        help="Path to baseline .fcproj file (optional)",
+        help="Path to baseline .remotion.json file (optional)",
     )
     p_checkpoint.add_argument(
         "--force",

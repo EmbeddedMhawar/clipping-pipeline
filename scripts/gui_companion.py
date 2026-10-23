@@ -2,18 +2,18 @@
 """
 scripts/gui_companion.py
 
-GUI Companion Sidecar Daemon for Storyteller FilmCraft in the Antigravity
+GUI Companion Sidecar Daemon for Remotion Studio & HyperFrames Preview in the Antigravity
 Short-Form Clipping Pipeline Plugin.
 
 Primary References:
-- docs/research/filmcraft-control-server.md
+- docs/adr/0012-remotion-and-hyperframes-rendering-engine.md
 - docs/research/fcproj-assembly-spec.md
 - GLOSSARY.md ("Live GUI Companion", "Feedback Checkpoint", "Preference Store")
 - GitHub Issues #22, #23, #25, #26, #27
 
-This daemon manages the live FilmCraft process lifecycle (`filmcraft --control <port>`),
+This daemon manages the live Remotion Studio / HyperFrames preview companion lifecycle,
 pings health over TCP JSON-lines RPC, dispatches timeline reloads on step completion,
-seeks and triggers playback, and watches project files for human editor saves.
+seeks and triggers playback, and watches project files (.remotion.json) for human editor saves.
 
 Zero external runtime dependencies (Python standard library only).
 """
@@ -70,12 +70,12 @@ def format_timecode(seconds: float, fps: float = 30.0) -> str:
 
 
 def ticks_to_seconds(ticks: int) -> float:
-    """Convert high-precision FilmCraft ticks to float seconds."""
+    """Convert high-precision timeline ticks to float seconds."""
     return float(ticks) / TICKS_PER_SECOND
 
 
 def seconds_to_ticks(seconds: float) -> int:
-    """Convert float seconds to high-precision FilmCraft ticks."""
+    """Convert float seconds to high-precision timeline ticks."""
     return int(round(seconds * TICKS_PER_SECOND))
 
 
@@ -90,11 +90,11 @@ def is_pid_alive(pid: Optional[int]) -> bool:
         return False
 
 
-# --- FilmCraft Control Client ---
+# --- Remotion Studio Control Client ---
 
 
-class FilmCraftControlClient:
-    """Client for FilmCraft --control <port> JSON-lines RPC server.
+class RemotionControlClient:
+    """Client for Remotion Studio / HyperFrames Preview companion JSON-lines RPC server.
 
     Maintains a streaming TCP connection over 127.0.0.1, formatting
     requests as newline-delimited JSON and parsing synchronous responses.
@@ -115,7 +115,7 @@ class FilmCraftControlClient:
         self._req_id = 0
 
     def connect(self) -> None:
-        """Establish TCP connection to FilmCraft control server."""
+        """Establish TCP connection to Remotion Studio control server."""
         self.close()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(self.timeout)
@@ -124,7 +124,7 @@ class FilmCraftControlClient:
         except (ConnectionRefusedError, socket.timeout) as e:
             sock.close()
             raise ConnectionRefusedError(
-                f"Could not connect to FilmCraft control server at {self.host}:{self.port} - {e}"
+                f"Could not connect to Remotion Studio control server at {self.host}:{self.port} - {e}"
             )
         self._sock = sock
         self._rfile = sock.makefile("r", encoding="utf-8")
@@ -179,26 +179,26 @@ class FilmCraftControlClient:
             self._wfile.flush()
         except Exception as e:
             self.close()
-            raise ConnectionResetError(f"Failed to transmit request to FilmCraft: {e}")
+            raise ConnectionResetError(f"Failed to transmit request to Remotion Studio: {e}")
 
         try:
             line = self._rfile.readline()
         except Exception as e:
             self.close()
-            raise ConnectionResetError(f"Failed to read response from FilmCraft: {e}")
+            raise ConnectionResetError(f"Failed to read response from Remotion Studio: {e}")
 
         if not line:
             self.close()
-            raise ConnectionResetError("FilmCraft closed control connection unexpectedly")
+            raise ConnectionResetError("Remotion Studio closed control connection unexpectedly")
 
         try:
             resp = json.loads(line)
         except json.JSONDecodeError as e:
-            raise RuntimeError(f"Malformed JSON response from FilmCraft: {line.strip()!r} - {e}")
+            raise RuntimeError(f"Malformed JSON response from Remotion Studio: {line.strip()!r} - {e}")
 
         if not resp.get("ok"):
             error_msg = resp.get("error", "Unknown control server error")
-            raise RuntimeError(f"FilmCraft RPC error ({method}): {error_msg}")
+            raise RuntimeError(f"Remotion Studio RPC error ({method}): {error_msg}")
 
         return resp.get("result")
 
@@ -209,7 +209,7 @@ class FilmCraftControlClient:
     # --- High-Level Editor Operations ---
 
     def open_project(self, path: Union[str, Path]) -> Dict[str, Any]:
-        """Open or reload a project file in FilmCraft via file.open."""
+        """Open or reload a project file in Remotion Studio via file.open."""
         abs_path = str(Path(path).resolve())
         return self.execute("file.open", {"path": abs_path})
 
@@ -277,7 +277,7 @@ class FilmCraftControlClient:
             return False
 
     def quit_app(self) -> None:
-        """Request graceful shutdown of the FilmCraft application."""
+        """Request graceful shutdown of the Remotion Studio companion application."""
         try:
             self.call("app.quit", {})
         except Exception:
@@ -332,24 +332,22 @@ class CompanionStateManager:
 
 
 class ProcessManager:
-    """Manages spawning, attaching, health checks, and termination of FilmCraft."""
+    """Manages spawning, attaching, health checks, and termination of Remotion Studio Companion."""
 
     @staticmethod
-    def find_filmcraft_binary() -> Optional[str]:
-        """Locate FilmCraft executable in PATH or standard user directories."""
-        env_bin = os.environ.get("FILMCRAFT_BIN")
+    def find_remotion_binary() -> Optional[str]:
+        """Locate Remotion / npx executable in PATH or standard user directories."""
+        env_bin = os.environ.get("REMOTION_BIN")
         if env_bin and os.path.isfile(env_bin) and os.access(env_bin, os.X_OK):
             return env_bin
 
-        which_bin = shutil.which("filmcraft")
+        which_bin = shutil.which("remotion")
         if which_bin:
             return which_bin
 
         search_paths = [
-            Path("/home/mhawar/.local/bin/filmcraft"),
-            Path("/home/mhawar/.local/share/filmcraft/squashfs-root/usr/bin/filmcraft"),
-            Path.home() / ".local" / "bin" / "filmcraft",
-            Path.home() / ".local" / "share" / "filmcraft" / "squashfs-root" / "usr" / "bin" / "filmcraft",
+            Path("/home/mhawar/.local/bin/remotion"),
+            Path.home() / ".local" / "bin" / "remotion",
         ]
         for p in search_paths:
             if p.is_file() and os.access(str(p), os.X_OK):
@@ -381,7 +379,7 @@ class ProcessManager:
         base_dir: Optional[Union[str, Path]] = None,
         log_file: Optional[Union[str, Path]] = None,
     ) -> Dict[str, Any]:
-        """Start or attach to FilmCraft --control <port>.
+        """Start or attach to Remotion Studio companion on <port>.
 
         If already running and responsive, attaches cleanly without respawning.
         """
@@ -389,7 +387,7 @@ class ProcessManager:
 
         # Check if already listening and responsive
         if cls.is_port_listening(port):
-            client = FilmCraftControlClient(port=port, timeout=1.5)
+            client = RemotionControlClient(port=port, timeout=1.5)
             try:
                 client.connect()
                 if client.ping():
@@ -417,21 +415,19 @@ class ProcessManager:
             except Exception:
                 client.close()
 
-        bin_path = binary or cls.find_filmcraft_binary()
+        bin_path = binary or cls.find_remotion_binary()
         if not bin_path:
             raise FileNotFoundError(
-                "FilmCraft executable not found. Set FILMCRAFT_BIN or ensure filmcraft is installed in PATH."
+                "Remotion Studio executable not found. Set REMOTION_BIN or ensure remotion is installed in PATH."
             )
 
-        cmd = [bin_path, "--control", str(port), "--no-recover"]
+        cmd = [bin_path, "studio", "--port", str(port)]
         resolved_proj = None
         if demo:
             cmd.append("--demo")
         elif project_path:
             resolved_proj = str(Path(project_path).resolve())
             cmd.append(resolved_proj)
-        else:
-            cmd.append("--empty")
 
         log_path = Path(log_file).resolve() if log_file else base / DEFAULT_LOG_FILENAME
 
@@ -450,7 +446,7 @@ class ProcessManager:
         pid = proc.pid
 
         # Wait for socket to become connectable and responsive
-        client = FilmCraftControlClient(port=port, timeout=1.0)
+        client = RemotionControlClient(port=port, timeout=1.0)
         start_time = time.time()
         connected = False
 
@@ -464,7 +460,7 @@ class ProcessManager:
                     except Exception:
                         pass
                 raise RuntimeError(
-                    f"FilmCraft process exited prematurely with code {proc.returncode}. Log snippet:\n{err_content}"
+                    f"Remotion Studio process exited prematurely with code {proc.returncode}. Log snippet:\n{err_content}"
                 )
             try:
                 client.connect()
@@ -481,7 +477,7 @@ class ProcessManager:
             if proc.poll() is None:
                 proc.terminate()
             raise TimeoutError(
-                f"Timed out waiting {timeout}s for FilmCraft control server on port {port} to respond."
+                f"Timed out waiting {timeout}s for Remotion Studio control server on port {port} to respond."
             )
 
         state = {
@@ -505,7 +501,7 @@ class ProcessManager:
         base_dir: Optional[Union[str, Path]] = None,
         timeout: float = 5.0,
     ) -> Dict[str, Any]:
-        """Gracefully stop FilmCraft process via app.quit or SIGTERM."""
+        """Gracefully stop Remotion Studio process via app.quit or SIGTERM."""
         base = Path(base_dir).resolve() if base_dir else Path.cwd()
         state = CompanionStateManager.load_state(base) or {}
         target_port = port or state.get("port") or DEFAULT_PORT
@@ -515,7 +511,7 @@ class ProcessManager:
 
         # Attempt RPC app.quit
         if cls.is_port_listening(target_port):
-            client = FilmCraftControlClient(port=target_port, timeout=2.0)
+            client = RemotionControlClient(port=target_port, timeout=2.0)
             try:
                 client.connect()
                 client.quit_app()
@@ -566,14 +562,14 @@ def check_health(
     timeout: float = 3.0,
     base_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
-    """Inspect FilmCraft health, process state, playhead position, and project."""
+    """Inspect Remotion Studio health, process state, playhead position, and project."""
     base = Path(base_dir).resolve() if base_dir else Path.cwd()
     state = CompanionStateManager.load_state(base) or {}
     resolved_port = port or state.get("port") or DEFAULT_PORT
     pid = state.get("pid")
     proc_alive = is_pid_alive(pid) if pid else None
 
-    client = FilmCraftControlClient(host=host, port=resolved_port, timeout=timeout)
+    client = RemotionControlClient(host=host, port=resolved_port, timeout=timeout)
     try:
         client.connect()
         playback = client.get_playback_status()
@@ -631,7 +627,7 @@ def reload_timeline(
     timeout: float = DEFAULT_TIMEOUT,
     base_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
-    """Dispatch project reload to FilmCraft GUI.
+    """Dispatch project reload to Remotion Studio Companion.
 
     If project_path is specified, opens that project file. If omitted,
     reverts the current project from disk baseline.
@@ -640,7 +636,7 @@ def reload_timeline(
     state = CompanionStateManager.load_state(base) or {}
     resolved_port = port or state.get("port") or DEFAULT_PORT
 
-    client = FilmCraftControlClient(host=host, port=resolved_port, timeout=timeout)
+    client = RemotionControlClient(host=host, port=resolved_port, timeout=timeout)
     client.connect()
 
     action_taken = ""
@@ -728,7 +724,7 @@ def seek_timeline(
     state = CompanionStateManager.load_state(base) or {}
     resolved_port = port or state.get("port") or DEFAULT_PORT
 
-    client = FilmCraftControlClient(host=host, port=resolved_port, timeout=timeout)
+    client = RemotionControlClient(host=host, port=resolved_port, timeout=timeout)
     client.connect()
 
     if seconds is not None:
@@ -760,7 +756,7 @@ def set_playback(
     state = CompanionStateManager.load_state(base) or {}
     resolved_port = port or state.get("port") or DEFAULT_PORT
 
-    client = FilmCraftControlClient(host=host, port=resolved_port, timeout=timeout)
+    client = RemotionControlClient(host=host, port=resolved_port, timeout=timeout)
     client.connect()
     if action == "play":
         status = client.play()
@@ -787,9 +783,9 @@ def watch_project_file(
     base_dir: Optional[Union[str, Path]] = None,
     on_save_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Monitor .fcproj file mtime to detect operator save events in FilmCraft GUI.
+    """Monitor .remotion.json file mtime to detect operator save events in Remotion Studio.
 
-    When the user saves changes in FilmCraft (Ctrl+S / File -> Save), the
+    When the user saves changes in Remotion Studio / Caption Studio, the
     file's mtime updates. This watcher captures the event, emits an alert,
     updates flag files, and notifies the pipeline.
     """
@@ -830,10 +826,10 @@ def watch_project_file(
             last_mtime = curr_mtime
             last_size = curr_size
 
-            # Probe FilmCraft control server if reachable
+            # Probe Remotion Studio control server if reachable
             proj_info = {}
             if resolved_port and ProcessManager.is_port_listening(resolved_port, host):
-                client = FilmCraftControlClient(host=host, port=resolved_port, timeout=1.5)
+                client = RemotionControlClient(host=host, port=resolved_port, timeout=1.5)
                 try:
                     client.connect()
                     proj_info = client.inspect_project()
@@ -878,11 +874,11 @@ def watch_project_file(
 # --- Embedded Mock Control Server for Automated Testing ---
 
 
-class MockFilmCraftServer(threading.Thread):
-    """Minimal zero-dependency mock FilmCraft JSON-lines RPC server.
+class MockRemotionServer(threading.Thread):
+    """Minimal zero-dependency mock Remotion Studio JSON-lines RPC server.
 
-    Emulates the FilmCraft --control protocol for headless CI, unit tests,
-    and environments lacking graphical X11 displays.
+    Emulates the Remotion Studio companion control protocol for headless CI,
+    unit tests, and environments lacking graphical displays.
     """
 
     def __init__(self, host: str = DEFAULT_HOST, port: int = 0):
@@ -900,7 +896,7 @@ class MockFilmCraftServer(threading.Thread):
         self.playing: bool = False
         self.playhead_ticks: int = 0
         self.project_name: str = "Mock Project"
-        self.project_path: Optional[str] = "/mock/path/project.fcproj"
+        self.project_path: Optional[str] = "/mock/path/project.remotion.json"
         self.dirty: bool = False
         self.revision: int = 1
         self.active_sequence: int = 21
@@ -1021,7 +1017,7 @@ class MockFilmCraftServer(threading.Thread):
                     "ok": True,
                     "result": {
                         "path": self.project_path,
-                        "schemaVersion": 12,
+                        "schemaVersion": 2,
                         "missingMedia": 0,
                     },
                 }
@@ -1072,13 +1068,13 @@ def run_self_tests(live: bool = False, mock_only: bool = False) -> bool:
         temp_path = Path(temp_dir)
 
         # 1. Start Mock Server
-        mock_server = MockFilmCraftServer()
+        mock_server = MockRemotionServer()
         mock_server.start()
         mock_server.ready_event.wait(timeout=3.0)
         port = mock_server.port
 
         try:
-            client = FilmCraftControlClient(port=port, timeout=2.0)
+            client = RemotionControlClient(port=port, timeout=2.0)
             client.connect()
 
             # Test 1: Ping & Handshake
@@ -1119,10 +1115,10 @@ def run_self_tests(live: bool = False, mock_only: bool = False) -> bool:
             assert_test("Sequence Inspection", seq.get("name") == "Main Sequence")
 
             # Test 5: File Operations (open & revert)
-            open_res = client.open_project(temp_path / "test.fcproj")
+            open_res = client.open_project(temp_path / "test.remotion.json")
             assert_test(
                 "File Open Command",
-                open_res.get("path") == str((temp_path / "test.fcproj").resolve()),
+                open_res.get("path") == str((temp_path / "test.remotion.json").resolve()),
             )
 
             revert_res = client.revert_project()
@@ -1163,14 +1159,14 @@ def run_self_tests(live: bool = False, mock_only: bool = False) -> bool:
 
             # Test 9: Reload Timeline Function
             reload_res = reload_timeline(
-                project_path=temp_path / "updated.fcproj",
+                project_path=temp_path / "updated.remotion.json",
                 port=port,
                 base_dir=temp_path,
             )
             assert_test("Reload Timeline Function", reload_res["status"] == "reloaded")
 
             # Test 10: Project File Watcher Detection
-            dummy_proj = temp_path / "project.fcproj"
+            dummy_proj = temp_path / "project.remotion.json"
             with open(dummy_proj, "w", encoding="utf-8") as f:
                 f.write('{"initial": true}\n')
 
@@ -1205,7 +1201,7 @@ def run_self_tests(live: bool = False, mock_only: bool = False) -> bool:
             assert_test("Flag File Generated", flag_file.is_file())
 
             # Test 11: Graceful App Quit
-            client = FilmCraftControlClient(port=port, timeout=2.0)
+            client = RemotionControlClient(port=port, timeout=2.0)
             client.connect()
             client.quit_app()
             client.close()
@@ -1215,10 +1211,10 @@ def run_self_tests(live: bool = False, mock_only: bool = False) -> bool:
         finally:
             mock_server.stop_server()
 
-        # Test 12: Live FilmCraft binary verification (if requested or available)
-        bin_path = ProcessManager.find_filmcraft_binary()
+        # Test 12: Live Remotion Studio binary verification (if requested or available)
+        bin_path = ProcessManager.find_remotion_binary()
         if (live or not mock_only) and bin_path and os.environ.get("DISPLAY"):
-            print("\n  [LIVE TEST] Testing against real FilmCraft binary on PATH...")
+            print("\n  [LIVE TEST] Testing against real Remotion Studio binary on PATH...")
             live_port = 9889
             try:
                 started = ProcessManager.start(
@@ -1230,7 +1226,7 @@ def run_self_tests(live: bool = False, mock_only: bool = False) -> bool:
                     base_dir=temp_path,
                 )
                 assert_test(
-                    "Live FilmCraft Start & Attach",
+                    "Live Remotion Studio Start & Attach",
                     started.get("status") in ("running", "attached"),
                 )
 
@@ -1241,9 +1237,9 @@ def run_self_tests(live: bool = False, mock_only: bool = False) -> bool:
                 assert_test("Live Playhead Seek", abs(live_seek["seconds"] - 1.5) < 0.1)
 
                 stopped = ProcessManager.stop(port=live_port, base_dir=temp_path)
-                assert_test("Live FilmCraft Clean Shutdown", stopped["clean"] is True)
+                assert_test("Live Remotion Studio Clean Shutdown", stopped["clean"] is True)
             except Exception as e:
-                assert_test("Live FilmCraft Verification", False, str(e))
+                assert_test("Live Remotion Studio Verification", False, str(e))
             finally:
                 ProcessManager.stop(port=live_port, base_dir=temp_path)
         else:
@@ -1265,25 +1261,25 @@ def run_demo(
 ) -> None:
     """Run an interactive demonstration of the GUI companion workflow."""
     print("╔════════════════════════════════════════════════════════════════════════╗")
-    print("║     STORYTELLER FILMCRAFT GUI COMPANION SIDECAR DAEMON DEMO            ║")
+    print("║     REMOTION STUDIO & HYPERFRAMES COMPANION SIDECAR DAEMON DEMO        ║")
     print("╚════════════════════════════════════════════════════════════════════════╝\n")
 
     mock_server = None
     if mock:
-        print("[DEMO 1/6] Launching embedded Mock FilmCraft Control Server...")
-        mock_server = MockFilmCraftServer(port=port)
+        print("[DEMO 1/6] Launching embedded Mock Remotion Control Server...")
+        mock_server = MockRemotionServer(port=port)
         mock_server.start()
         mock_server.ready_event.wait(timeout=2.0)
         port = mock_server.port
         print(f"  -> Mock server listening on 127.0.0.1:{port}\n")
     else:
-        print(f"[DEMO 1/6] Starting / Attaching to FilmCraft on 127.0.0.1:{port}...")
+        print(f"[DEMO 1/6] Starting / Attaching to Remotion Studio on 127.0.0.1:{port}...")
         try:
             started = ProcessManager.start(port=port, project_path=project_path, background=True)
             print(f"  -> Process status: {started.get('status')}, PID: {started.get('pid')}\n")
         except Exception as e:
             print(f"  -> Failed to start live binary ({e}). Falling back to mock server...")
-            mock_server = MockFilmCraftServer(port=port)
+            mock_server = MockRemotionServer(port=port)
             mock_server.start()
             mock_server.ready_event.wait(timeout=2.0)
             port = mock_server.port
@@ -1324,18 +1320,18 @@ def run_demo(
         print("[DEMO 6/6] Demonstrating Project File Save Watcher...")
         import tempfile
 
-        with tempfile.NamedTemporaryFile("w", suffix=".fcproj", delete=False) as tf:
+        with tempfile.NamedTemporaryFile("w", suffix=".remotion.json", delete=False) as tf:
             tf.write('{"version": 1}\n')
-            temp_fcproj = tf.name
+            temp_proj = tf.name
 
-        flag_file = temp_fcproj + ".flag"
+        flag_file = temp_proj + ".flag"
         try:
-            print(f"  -> Watching temporary project file: {temp_fcproj}")
+            print(f"  -> Watching temporary project file: {temp_proj}")
             event_holder = []
 
             def watch_worker():
                 ev = watch_project_file(
-                    project_path=temp_fcproj,
+                    project_path=temp_proj,
                     poll_interval=0.1,
                     timeout=3.0,
                     once=True,
@@ -1350,8 +1346,8 @@ def run_demo(
             time.sleep(0.3)
 
             # Simulate editor saving changes
-            print("  -> Simulating operator pressing Ctrl+S in FilmCraft GUI...")
-            with open(temp_fcproj, "a", encoding="utf-8") as f:
+            print("  -> Simulating operator pressing Ctrl+S in Remotion Studio...")
+            with open(temp_proj, "a", encoding="utf-8") as f:
                 f.write('{"updated_by_operator": true}\n')
 
             wt.join(timeout=2.0)
@@ -1362,7 +1358,7 @@ def run_demo(
             else:
                 print("  -> Watcher timeout without detected event.\n")
         finally:
-            for p in (temp_fcproj, flag_file):
+            for p in (temp_proj, flag_file):
                 if os.path.exists(p):
                     os.unlink(p)
 
@@ -1381,22 +1377,22 @@ def run_demo(
 def main():
     parser = argparse.ArgumentParser(
         prog="gui_companion.py",
-        description="GUI Companion Sidecar Daemon for Storyteller FilmCraft.",
+        description="GUI Companion Sidecar Daemon for Remotion Studio & HyperFrames Preview.",
     )
     subparsers = parser.add_subparsers(dest="subcommand", help="Command to execute")
 
     # start
-    p_start = subparsers.add_parser("start", help="Start FilmCraft GUI or attach to running instance")
+    p_start = subparsers.add_parser("start", help="Start Remotion Studio companion or attach to running instance")
     p_start.add_argument("-p", "--port", type=int, default=DEFAULT_PORT, help=f"TCP port (default: {DEFAULT_PORT})")
-    p_start.add_argument("--project", type=str, default=None, help="Project .fcproj file to open on start")
-    p_start.add_argument("--demo", action="store_true", help="Launch with FilmCraft built-in demo project")
-    p_start.add_argument("--bin", type=str, default=None, help="Path to filmcraft binary")
+    p_start.add_argument("--project", type=str, default=None, help="Project .remotion.json file to open on start")
+    p_start.add_argument("--demo", action="store_true", help="Launch with Remotion built-in demo project")
+    p_start.add_argument("--bin", type=str, default=None, help="Path to remotion binary")
     p_start.add_argument("--foreground", action="store_true", help="Run process in foreground instead of background")
     p_start.add_argument("--timeout", type=float, default=10.0, help="Startup timeout in seconds")
     p_start.add_argument("--json", action="store_true", help="Output machine-readable JSON")
 
     # stop
-    p_stop = subparsers.add_parser("stop", help="Stop FilmCraft GUI companion process")
+    p_stop = subparsers.add_parser("stop", help="Stop Remotion Studio companion process")
     p_stop.add_argument("-p", "--port", type=int, default=None, help="TCP port of instance")
     p_stop.add_argument("--timeout", type=float, default=5.0, help="Shutdown timeout in seconds")
     p_stop.add_argument("--json", action="store_true", help="Output machine-readable JSON")
@@ -1409,7 +1405,7 @@ def main():
 
     # reload
     p_reload = subparsers.add_parser("reload", help="Dispatch timeline reload on step completion")
-    p_reload.add_argument("--project", type=str, default=None, help="Project .fcproj path to open/reload")
+    p_reload.add_argument("--project", type=str, default=None, help="Project .remotion.json path to open/reload")
     p_reload.add_argument("-p", "--port", type=int, default=None, help="TCP port")
     p_reload.add_argument("--json", action="store_true", help="Output machine-readable JSON")
 
@@ -1418,23 +1414,23 @@ def main():
     p_seek.add_argument("-s", "--seconds", type=float, default=None, help="Seek target in seconds")
     p_seek.add_argument("-f", "--frame", type=int, default=None, help="Seek target frame index")
     p_seek.add_argument("-t", "--timecode", type=str, default=None, help="Seek target SMPTE timecode (HH:MM:SS:FF)")
-    p_seek.add_argument("--ticks", type=int, default=None, help="Seek target in exact FilmCraft ticks")
+    p_seek.add_argument("--ticks", type=int, default=None, help="Seek target in exact timeline ticks")
     p_seek.add_argument("-p", "--port", type=int, default=None, help="TCP port")
     p_seek.add_argument("--json", action="store_true", help="Output machine-readable JSON")
 
     # play
-    p_play = subparsers.add_parser("play", help="Start playback in FilmCraft")
+    p_play = subparsers.add_parser("play", help="Start playback in Remotion Studio")
     p_play.add_argument("-p", "--port", type=int, default=None, help="TCP port")
     p_play.add_argument("--json", action="store_true", help="Output machine-readable JSON")
 
     # stop-playback
-    p_pause = subparsers.add_parser("stop-playback", help="Stop / pause playback in FilmCraft")
+    p_pause = subparsers.add_parser("stop-playback", help="Stop / pause playback in Remotion Studio")
     p_pause.add_argument("-p", "--port", type=int, default=None, help="TCP port")
     p_pause.add_argument("--json", action="store_true", help="Output machine-readable JSON")
 
     # watch
     p_watch = subparsers.add_parser("watch", help="Watch project file for operator save events")
-    p_watch.add_argument("--project", type=str, required=True, help="Path to .fcproj file to monitor")
+    p_watch.add_argument("--project", type=str, required=True, help="Path to .remotion.json file to monitor")
     p_watch.add_argument("--interval", type=float, default=0.5, help="Polling interval in seconds")
     p_watch.add_argument("--timeout", type=float, default=None, help="Watch timeout in seconds")
     p_watch.add_argument("--once", action="store_true", help="Exit after first save event")
@@ -1451,8 +1447,8 @@ def main():
     # demo
     p_demo = subparsers.add_parser("demo", help="Run interactive demonstration walkthrough")
     p_demo.add_argument("-p", "--port", type=int, default=DEFAULT_PORT, help="Port to run demo on")
-    p_demo.add_argument("--mock", action="store_true", help="Use mock server instead of live FilmCraft")
-    p_demo.add_argument("--project", type=str, default=None, help="Project .fcproj file")
+    p_demo.add_argument("--mock", action="store_true", help="Use mock server instead of live Remotion Studio")
+    p_demo.add_argument("--project", type=str, default=None, help="Project .remotion.json file")
 
     args = parser.parse_args()
 
@@ -1473,14 +1469,14 @@ def main():
             if args.json:
                 print(json.dumps(res, indent=2))
             else:
-                print(f"[GUI COMPANION] Started FilmCraft (status={res.get('status')}, port={res.get('port')}, pid={res.get('pid')})")
+                print(f"[GUI COMPANION] Started Remotion Studio (status={res.get('status')}, port={res.get('port')}, pid={res.get('pid')})")
 
         elif args.subcommand == "stop":
             res = ProcessManager.stop(port=args.port, timeout=args.timeout)
             if args.json:
                 print(json.dumps(res, indent=2))
             else:
-                print(f"[GUI COMPANION] Stopped FilmCraft (port={res.get('port')}, clean={res.get('clean')})")
+                print(f"[GUI COMPANION] Stopped Remotion Studio (port={res.get('port')}, clean={res.get('clean')})")
 
         elif args.subcommand == "status":
             res = check_health(port=args.port, timeout=args.timeout)
@@ -1488,12 +1484,12 @@ def main():
                 print(json.dumps(res, indent=2))
             else:
                 if res.get("connected"):
-                    print(f"FilmCraft Companion: HEALTHY (port={res['port']}, pid={res.get('pid')})")
+                    print(f"Remotion Studio Companion: HEALTHY (port={res['port']}, pid={res.get('pid')})")
                     print(f"  Project:  {res.get('project_name')} ({res.get('project_path')})")
                     print(f"  Playhead: {res.get('playhead_seconds', 0.0):.3f}s [{res.get('playhead_timecode')}]")
                     print(f"  State:    {'PLAYING' if res.get('playing') else 'PAUSED'}, dirty={res.get('dirty')}, rev={res.get('revision')}")
                 else:
-                    print(f"FilmCraft Companion: DISCONNECTED (port={res['port']}) - {res.get('error')}")
+                    print(f"Remotion Studio Companion: DISCONNECTED (port={res['port']}) - {res.get('error')}")
             if not res.get("connected"):
                 sys.exit(1)
 

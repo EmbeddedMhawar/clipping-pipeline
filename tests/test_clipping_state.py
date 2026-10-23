@@ -633,6 +633,41 @@ class TestClippingStateCLI(unittest.TestCase):
         self.assertEqual(state["steps"]["clipping-publisher"]["status"], "completed")
         self.assertIsNotNone(state["steps"]["clipping-publisher"]["completed_at"])
 
+    def test_approve_outputs_next_step_prompt(self):
+        self.run_cli(["init", "--dir", str(self.project_dir)], check=True)
+        with open(self.state_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        state["campaign"] = {
+            "title": "HardScope — Unpacked Episode 2",
+            "project": "hardscope-unpacked-episode-2",
+        }
+        with open(self.state_file, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+
+        res = self.run_cli(
+            ["approve", "--step", "clipping-guidelines", "--dir", str(self.project_dir)],
+            check=True,
+        )
+        self.assertIn(
+            "Campaign: HardScope — Unpacked Episode 2 (hardscope-unpacked-episode-2) proceed with Step 2 (clipping-transcription)",
+            res.stdout,
+        )
+
+        state["guidelines_approved"] = True
+        state["steps"]["clipping-transcription"]["approved"] = True
+        state["steps"]["clipping-transcription"]["status"] = "completed"
+        with open(self.state_file, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+
+        res3 = self.run_cli(
+            ["approve", "--step", "clipping-hook-hunter", "--dir", str(self.project_dir)],
+            check=True,
+        )
+        self.assertIn(
+            "Campaign: HardScope — Unpacked Episode 2 (hardscope-unpacked-episode-2) proceed with Step 4 (clipping-assembly)",
+            res3.stdout,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

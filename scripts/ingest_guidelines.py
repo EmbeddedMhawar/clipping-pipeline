@@ -85,6 +85,7 @@ def parse_raw_guidelines_text(text: str) -> Tuple[Dict[str, Any], List[str]]:
     injecting Cole Corcoran Tier-1 defaults marked with [Default Applied].
     """
     defaults_applied: List[str] = []
+    text = text.lstrip("\ufeff")
 
     # Title extraction
     title_match = re.search(r"^#\s+(.+?)(?:\s+Guidelines)?$", text, re.MULTILINE)
@@ -116,6 +117,8 @@ def parse_raw_guidelines_text(text: str) -> Tuple[Dict[str, Any], List[str]]:
             client = name.strip()
         elif handle:
             client = f"@{handle.strip()}"
+    elif "hardscope" in text.lower():
+        client = "HardScope"
     elif "curious mike" in text.lower():
         client = "Curious Mike"
 
@@ -124,7 +127,11 @@ def parse_raw_guidelines_text(text: str) -> Tuple[Dict[str, Any], List[str]]:
     source_url = yt_url_match.group(0) if yt_url_match else ""
 
     channel_match = re.search(r"(?:\*\*|\b)Channel\**:\s*`?(@[a-zA-Z0-9_.]+)`?", text, re.IGNORECASE)
-    channel = channel_match.group(1) if channel_match else ""
+    if channel_match:
+        channel = channel_match.group(1)
+    else:
+        yt_tag_match = re.search(r"(?:YouTube|\bYT\b)\**:\s*`?(@[a-zA-Z0-9_.]+)`?", text, re.IGNORECASE)
+        channel = yt_tag_match.group(1) if yt_tag_match else ""
 
     duration_match = re.search(r"\((\d{1,2}:\d{2}(?::\d{2})?)\)", text)
     source_duration = duration_match.group(1) if duration_match else ""
@@ -138,9 +145,17 @@ def parse_raw_guidelines_text(text: str) -> Tuple[Dict[str, Any], List[str]]:
         min_payout_views = int(min_payout_match.group(2).replace(",", ""))
     else:
         min_views_search = re.search(r"([\d,]+)\s+views\s+(?:minimum|floor)", text, re.IGNORECASE)
-        min_payout_views = int(min_views_search.group(1).replace(",", "")) if min_views_search else 2000
+        if min_views_search:
+            min_payout_views = int(min_views_search.group(1).replace(",", ""))
+        else:
+            min_dollar_search = re.search(r"\$(\d+(?:\.\d+)?)\s+minimum", text, re.IGNORECASE)
+            if min_dollar_search:
+                min_dollar = float(min_dollar_search.group(1))
+                min_payout_views = int((min_dollar / rate_per_1k) * 1000) if rate_per_1k > 0 else 2000
+            else:
+                min_payout_views = 2000
 
-    max_dollar_match = re.search(r"(?:Maximum|Max|Cap).*?\$(\d+(?:\.\d+)?)", text, re.IGNORECASE)
+    max_dollar_match = re.search(r"(?:Maximum|Max|Cap)(?:(?!minimum).)*?\$(\d+(?:\.\d+)?)(?!\s+minimum)", text, re.IGNORECASE)
     max_dollar_per_clip = float(max_dollar_match.group(1)) if max_dollar_match else 300.0
 
     max_views_match = re.search(r"capped\s+at\s+([\d,]+)\s+views", text, re.IGNORECASE)
@@ -151,12 +166,14 @@ def parse_raw_guidelines_text(text: str) -> Tuple[Dict[str, Any], List[str]]:
 
     # Platforms
     platforms: List[str] = []
+    if re.search(r"\b(?:youtube|shorts)\b", text, re.IGNORECASE):
+        platforms.append("YouTube Shorts")
     if re.search(r"\btiktok\b", text, re.IGNORECASE):
         platforms.append("TikTok")
     if re.search(r"\b(?:instagram|reels)\b", text, re.IGNORECASE):
         platforms.append("Instagram Reels")
-    if re.search(r"\b(?:youtube|shorts)\b", text, re.IGNORECASE):
-        platforms.append("YouTube Shorts")
+    if re.search(r"(?:\b|\s)X(?:\b|\s)|twitter", text, re.IGNORECASE):
+        platforms.append("X")
     if not platforms:
         platforms = ["TikTok", "Instagram Reels", "YouTube Shorts"]
         defaults_applied.append("platforms: [TikTok, Instagram Reels, YouTube Shorts] [Default Applied]")
@@ -174,11 +191,16 @@ def parse_raw_guidelines_text(text: str) -> Tuple[Dict[str, Any], List[str]]:
         duration_rule["ideal_min"] = float(dur_range_match.group(3)) if dur_range_match.group(3) else 25.0
         duration_rule["ideal_max"] = float(dur_range_match.group(4)) if dur_range_match.group(4) else 45.0
     else:
+        min_sec_match = re.search(r"at least\s+(\d+)\s+seconds long", text, re.IGNORECASE)
         duration_rule = dict(COLE_CORCORAN_DEFAULTS["duration"])
-        defaults_applied.append("duration: 25s–45s ideal (bounds 20s–60s) [Default Applied]")
+        if min_sec_match:
+            duration_rule["min_seconds"] = float(min_sec_match.group(1))
+        defaults_applied.append(f"duration: {duration_rule['ideal_min']}s–{duration_rule['ideal_max']}s ideal (bounds {duration_rule['min_seconds']}s–{duration_rule['max_seconds']}s) [Default Applied]")
 
     # Tier-1 Geo
     tier1_match = re.search(r"(\d+(?:\.\d+)?)\s*%\s*(?:Tier-?1|US,\s*Canada,\s*UK)", text, re.IGNORECASE)
+    if not tier1_match:
+        tier1_match = re.search(r"T1\s*(\d+(?:\.\d+)?)\s*%", text, re.IGNORECASE)
     if tier1_match:
         tier1_geo = float(tier1_match.group(1))
     else:
@@ -213,9 +235,10 @@ def parse_raw_guidelines_text(text: str) -> Tuple[Dict[str, Any], List[str]]:
     # Caption Closers
     closers: List[str] = []
     # Search for numbered closers list
-    closer_matches = re.findall(r"^\s*\d+\.\s*`?([a-zA-Z0-9\s@_-]+?)`?\s*$", text, re.MULTILINE)
-    if closer_matches and len(closer_matches) >= 4:
-        closers = [c.strip() for c in closer_matches]
+    closer_matches = re.findall(r"^\s*\d+\.\s*`?([a-zA-Z0-9\s@#_.:!'-]+?)`?\s*$", text, re.MULTILINE)
+    filtered_closers = [c.strip() for c in closer_matches if not c.lower().startswith("rule") and not c.lower().startswith("hook") and not c.lower().startswith("let the scene") and not c.lower().startswith("add big") and not c.lower().startswith("keep it") and not c.lower().startswith("real moments")]
+    if filtered_closers and len(filtered_closers) >= 4:
+        closers = filtered_closers
     else:
         closers = list(COLE_CORCORAN_DEFAULTS["caption_closers"])
         if not closers and "closer" not in text.lower():
@@ -232,6 +255,10 @@ def parse_raw_guidelines_text(text: str) -> Tuple[Dict[str, Any], List[str]]:
     prohibited_edits = list(COLE_CORCORAN_DEFAULTS["prohibited_edits"])
     if not any(k in text.lower() for k in ["aura", "glow", "skull", "ai_avatar"]):
         defaults_applied.append("prohibited_edits: [aura, glow, skull, ai_avatar, ai_broll, opus_clips] [Default Applied]")
+    if "faze" in text.lower() and "faze_mentions" not in prohibited_edits:
+        prohibited_edits.append("faze_mentions")
+    if "politic" in text.lower() and "political_content" not in prohibited_edits:
+        prohibited_edits.append("political_content")
 
     # Single post rule
     single_post = True

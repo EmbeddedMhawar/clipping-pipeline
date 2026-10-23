@@ -27,7 +27,6 @@ STATE_CLI = SCRIPTS_DIR / "clipping_state.py"
 
 REAL_GUIDELINES_CANDIDATES = [
     Path("/home/mhawar/Work/video-editing/references/CAMPAIGN_GUIDELINES.md"),
-    Path("/home/mhawar/Work/video-editing/.agents/skills/filmcraft-clipping-campaign/references/CAMPAIGN_GUIDELINES.md"),
     REPO_ROOT.parent / "video-editing" / "references" / "CAMPAIGN_GUIDELINES.md",
 ]
 

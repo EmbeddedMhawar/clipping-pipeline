@@ -6,7 +6,7 @@ Comprehensive test suite verifying the clipping-assembly engine and
 checkpoint triggering (GitHub Issue #29).
 
 Verifies:
-1. FcprojBuilder JSON schema validity against `filmcraft-cli inspect sequence`
+1. RemotionBuilder JSON schema validity and React/TypeScript bundle scaffolding
 2. Track stack layering (4 video tracks, 3 audio tracks)
 3. Speaker ping-pong crop calculations & punch-in scaling
 4. Dead air pruning (>0.40s) with consonant protection buffer (0.08s)
@@ -49,7 +49,7 @@ from scripts.clipping_assembly import (
     WATERMARK_POS_Y,
     WATERMARK_SCALE_PCT,
     AssemblyConfig,
-    FcprojBuilder,
+    RemotionBuilder,
     SubCut,
     assemble_vertical_project,
     frames_to_ticks,
@@ -63,8 +63,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SKILL_FILE = REPO_ROOT / "skills" / "clipping-assembly" / "SKILL.md"
 
 
-class TestFcprojBuilder(unittest.TestCase):
-    """Unit tests for the FcprojBuilder class and time base conversions."""
+class TestRemotionBuilder(unittest.TestCase):
+    """Unit tests for the RemotionBuilder class and time base conversions."""
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -91,9 +91,9 @@ class TestFcprojBuilder(unittest.TestCase):
         self.assertEqual(frames_to_ticks(1, 30), 8_467_200_000)
         self.assertEqual(frames_to_ticks(1, 60), 4_233_600_000)
 
-    def test_fcproj_schema_validity_with_filmcraft_cli(self):
-        """Validates declarative JSON project against filmcraft-cli inspect sequence."""
-        out_proj = self.tmp / "test_declarative.fcproj"
+    def test_remotion_schema_and_bundle_validity(self):
+        """Validates declarative Remotion JSON project and React/TSX composition bundle."""
+        out_proj = self.tmp / "test_declarative.remotion.json"
         config = AssemblyConfig(
             project_name="TestSchemaValidity",
             output_path=out_proj,
@@ -106,42 +106,34 @@ class TestFcprojBuilder(unittest.TestCase):
             ],
         )
 
-        builder = FcprojBuilder(config)
+        builder = RemotionBuilder(config)
         doc = builder.build()
 
         with open(out_proj, "w", encoding="utf-8") as f:
             json.dump(doc, f, indent=2)
 
         # Basic document structure
-        self.assertEqual(doc["format"], "filmcraft.project")
-        self.assertEqual(doc["schema_version"], 12)
-        self.assertEqual(doc["generator"], "FilmCraft 0.4.0")
+        self.assertEqual(doc["format"], "remotion.project")
+        self.assertEqual(doc["schema_version"], 2)
+        self.assertEqual(doc["generator"], "Remotion 4.0 + HyperFrames 1.0")
         self.assertIn("project", doc)
         self.assertIn("items", doc["project"])
         self.assertIn("view", doc)
 
-        # Test against filmcraft-cli if binary is available
-        cli_path = shutil.which("filmcraft-cli")
-        if cli_path:
-            res = subprocess.run(
-                [cli_path, "--project", str(out_proj), "inspect", "sequence"],
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(
-                res.returncode,
-                0,
-                f"filmcraft-cli failed on declarative project: {res.stderr}",
-            )
-            parsed_inspect = json.loads(res.stdout)
-            self.assertIn("video", parsed_inspect)
-            self.assertIn("audio", parsed_inspect)
-            self.assertEqual(len(parsed_inspect["video"]), 4)
-            self.assertEqual(len(parsed_inspect["audio"]), 3)
+        # Verify React/TypeScript Remotion bundle scaffolding
+        bundle_info = builder.write_remotion_bundle(self.tmp, doc)
+        self.assertTrue(Path(bundle_info["root_tsx"]).is_file())
+        self.assertTrue(Path(bundle_info["composition_tsx"]).is_file())
+        self.assertTrue(Path(bundle_info["props_json"]).is_file())
+        comp_text = Path(bundle_info["composition_tsx"]).read_text(encoding="utf-8")
+        self.assertIn("OffthreadVideo", comp_text)
+        self.assertIn("Sequence", comp_text)
+        self.assertIn("startFrom={cut.startFrom}", comp_text)
+        self.assertIn("scale(${scale})", comp_text)
 
     def test_track_stack_layering(self):
         """Verifies strict 4-video / 3-audio track hierarchy and configurations."""
-        out_proj = self.tmp / "test_tracks.fcproj"
+        out_proj = self.tmp / "test_tracks.remotion.json"
         config = AssemblyConfig(
             project_name="TrackStackTest",
             output_path=out_proj,
@@ -156,7 +148,7 @@ class TestFcprojBuilder(unittest.TestCase):
             ],
         )
 
-        builder = FcprojBuilder(config)
+        builder = RemotionBuilder(config)
         doc = builder.build()
 
         seq = doc["project"]["items"]["1"]["kind"]["Sequence"]
@@ -234,7 +226,7 @@ class TestFcprojBuilder(unittest.TestCase):
 
     def test_speaker_ping_pong_crop_calculations(self):
         """Verifies speaker anchor coordinates and punch-in scaling."""
-        out_proj = self.tmp / "test_ping_pong.fcproj"
+        out_proj = self.tmp / "test_ping_pong.remotion.json"
         config = AssemblyConfig(
             project_name="PingPongTest",
             output_path=out_proj,
@@ -248,7 +240,7 @@ class TestFcprojBuilder(unittest.TestCase):
             ],
         )
 
-        builder = FcprojBuilder(config)
+        builder = RemotionBuilder(config)
         doc = builder.build()
 
         seq = doc["project"]["items"]["1"]["kind"]["Sequence"]
@@ -417,10 +409,10 @@ class TestClippingAssemblyIntegration(unittest.TestCase):
         )
 
         self.assertEqual(res["status"], "success")
-        fcproj_path = Path(res["project_file"])
+        remotion_proj_path = Path(res["remotion_project_file"])
         meta_path = Path(res["meta_file"])
 
-        self.assertTrue(fcproj_path.is_file())
+        self.assertTrue(remotion_proj_path.is_file())
         self.assertTrue(meta_path.is_file())
 
         # Check state persistence
@@ -431,7 +423,7 @@ class TestClippingAssemblyIntegration(unittest.TestCase):
         step_asm = state["steps"]["clipping-assembly"]
         self.assertIn(step_asm["status"], ("staged", "awaiting_checkpoint"))
         self.assertTrue(step_asm.get("checkpoint", {}).get("staged") or step_asm.get("staged"))
-        self.assertIn("project_file", step_asm["params"])
+        self.assertIn("remotion_project_file", step_asm["params"])
         self.assertEqual(step_asm["params"]["project_name"], "test_assembly")
         self.assertEqual(step_asm["params"]["cuts_count"], 2)
 
@@ -571,8 +563,8 @@ class TestClippingAssemblyIntegration(unittest.TestCase):
         self.assertEqual(res_asm.returncode, 0, f"CLI assemble failed: {res_asm.stderr}")
         asm_data = json.loads(res_asm.stdout)
         self.assertEqual(asm_data["status"], "success")
-        created_fcproj = Path(asm_data["project_file"])
-        self.assertTrue(created_fcproj.is_file())
+        created_proj = Path(asm_data["remotion_project_file"])
+        self.assertTrue(created_proj.is_file())
 
         # 2. inspect CLI
         res_inspect = subprocess.run(
@@ -581,7 +573,7 @@ class TestClippingAssemblyIntegration(unittest.TestCase):
                 str(asm_cli),
                 "inspect",
                 "--project",
-                str(created_fcproj),
+                str(created_proj),
                 "--json",
             ],
             capture_output=True,
@@ -592,6 +584,75 @@ class TestClippingAssemblyIntegration(unittest.TestCase):
         self.assertEqual(inspect_data["project_name"], "cli_clip")
         self.assertEqual(len(inspect_data["video_tracks"]), 4)
         self.assertEqual(len(inspect_data["audio_tracks"]), 3)
+
+    def test_assembly_proxy_explicit_and_autodetect(self):
+        """Verifies proxy linking in .remotion.json both explicitly and via Proxies/ auto-detection."""
+        asm_cli = REPO_ROOT / "scripts" / "clipping_assembly.py"
+        raw_video = self.project_dir / "raw" / "show.mp4"
+        raw_video.parent.mkdir(parents=True, exist_ok=True)
+        raw_video.touch()
+
+        proxies_dir = raw_video.parent / "Proxies"
+        proxies_dir.mkdir(parents=True, exist_ok=True)
+        proxy_file = proxies_dir / "show_Proxy.mp4"
+        proxy_file.touch()
+
+        # 1. Auto-detection test
+        out_auto = self.project_dir / "out_auto"
+        res_auto = subprocess.run(
+            [
+                sys.executable,
+                str(asm_cli),
+                "assemble",
+                "--media",
+                str(raw_video),
+                "--output-dir",
+                str(out_auto),
+                "--no-checkpoint",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res_auto.returncode, 0, res_auto.stderr)
+        remotion_auto = out_auto / "show.remotion.json"
+        with open(remotion_auto, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        media_item = data["project"]["items"]["2"]["kind"]["Media"]
+        self.assertIsNotNone(media_item.get("proxy"))
+        self.assertEqual(
+            media_item["proxy"]["File"]["path"],
+            str(proxy_file.resolve()),
+        )
+
+        # 2. Explicit proxy argument test
+        custom_proxy = self.project_dir / "custom_proxy.mp4"
+        custom_proxy.touch()
+        out_exp = self.project_dir / "out_exp"
+        res_exp = subprocess.run(
+            [
+                sys.executable,
+                str(asm_cli),
+                "assemble",
+                "--media",
+                str(raw_video),
+                "--proxy",
+                str(custom_proxy),
+                "--output-dir",
+                str(out_exp),
+                "--no-checkpoint",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res_exp.returncode, 0, res_exp.stderr)
+        remotion_exp = out_exp / "show.remotion.json"
+        with open(remotion_exp, "r", encoding="utf-8") as f:
+            data_exp = json.load(f)
+        media_exp = data_exp["project"]["items"]["2"]["kind"]["Media"]
+        self.assertEqual(
+            media_exp["proxy"]["File"]["path"],
+            str(custom_proxy.resolve()),
+        )
 
 
 class TestClippingAssemblySkill(unittest.TestCase):
