@@ -105,6 +105,37 @@ Per **ADR 0008**, short-form algorithms enforce trust filtering. Accounts advanc
 | **`Ramp-Up`** | Day 11–21 | **2–3 posts** | 2.5 hours | • 15 mins niche feed browsing<br>• Publish 2–3 spaced clips (min 2.5h spacing)<br>• Monitor view stability<br>• Engage with audience |
 | **`Mature`** | Day 22+ | **Up to 4 posts** | 2.0 hours | • 10 mins community engagement<br>• Publish up to 4 scheduled clips (subject to campaign cap)<br>• Review analytics performance |
 
+#### BloxClips Platform-Specific Warmup Methodology
+
+To prevent accounts from being flagged or trapped in 0–200 view jail, the pipeline integrates the **BloxClips Warmup Playbook**:
+
+1. **TikTok Protocol (Days 1–5)**:
+   - **Day 1**: 20–25m FYP scroll, max 2 likes, 0 comments, 0 posts, no deliberate search.
+   - **Day 2**: 20–25m FYP scroll, 4–5 likes, 1–2 comments, 0 posts.
+   - **Day 3**: 20–25m FYP scroll, 4–6 likes, 2–3 comments, 0 posts.
+   - **Day 4 (Upload Buffer Rule)**: 10m FYP browsing *before* upload, publish 1 test clip, 10m FYP browsing *after* upload (do not sit on profile repeatedly refreshing views).
+   - **Week 2+**: Daily creator research + scheduled posting.
+
+2. **Instagram Reels 5-Phase Recommendation Training**:
+   - **Phase 1**: Watch 5–10 Explore videos without heavy actions.
+   - **Phase 2**: Select $\ge 3$ Niche Topics in settings/Explore.
+   - **Phase 3**: Spend 10m searching & watching niche creators.
+   - **Phase 4 (Mandatory Rest Seam)**: Close app completely for 1–2 hours to let background graph clustering index profile interests.
+   - **Phase 5**: Return to Reels feed, skip non-niche, watch niche to end until feed is $>50\%$ niche-aligned.
+   - **Profile Rules**: Professional/Creator account, clean PFP, concise bio, **zero external bio links** during warmup.
+
+3. **YouTube Shorts Growth Engine**:
+   - 30–35 minutes daily dedicated session (competitor hook research, retention analysis).
+   - Strict single-account session stability (no switching between multiple Google accounts on same session).
+   - First 2–3s payoff hook architecture (no conversational greetings).
+   - High retention target ($\ge 70\%$ viewed vs. swiped, $\ge 85–100\%$ completion).
+
+4. **Hardware & Network Isolation (Level 0)**:
+   - Physical SIM removed (eliminates cellular carrier MCC/MNC tracking).
+   - GPS Location Services and Bluetooth disabled.
+   - Dedicated Static ISP Proxy (via V2Box) or NordVPN with Always-On Kill Switch ("Block connections without VPN").
+   - Proxy Expiry Sentinel: Renew static ISP proxies $\ge 3$ days before expiration to prevent IP rotation and account re-flagging.
+
 Generate the current day's actionable task agenda for all channels:
 
 ```bash

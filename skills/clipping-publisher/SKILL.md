@@ -112,6 +112,11 @@ Persist execution receipt and complete pipeline step approval:
    ```
    Confirm all 8 pipeline steps reflect completed and approved status.
 
+### 5. Final Campaign Pipeline Summary
+Following Step 8 approval:
+1. Concisely summarize the entire pipeline delivery: published YouTube Shorts, mobile-delivered packages for TikTok / Instagram Reels, updated daily channel quotas, and final `publication_manifest` audit trail.
+2. Confirm that all 8 pipeline stages are complete and approved.
+
 ---
 
 ## Completion Criteria

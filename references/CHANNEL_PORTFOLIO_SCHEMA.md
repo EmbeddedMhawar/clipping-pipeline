@@ -111,12 +111,31 @@ Per **ADR 0009**, paid clipping reward programs and platform anti-spam rules str
 - `enabled` (`boolean`, default: true): Whether delivery protocol is active.
 
 #### 5. `warmup_protocol`
+- `strategy` (`string`): Strategy methodology (e.g. `"bloxclips"`, `"generic"`).
 - `daily_actions` (`array[string]`): Action checklist (e.g. `["browse_niche_feed", "like_relevant_videos"]`).
 - `niche_keywords` (`array[string]`): Topics and hashtags to search and watch during warmup browsing.
 - `browsing_minutes_per_day` (`integer`, min: 0): Target duration of algorithmic session.
 - `target_interactions_per_day` (`integer`, min: 0): Number of likes/comments/follows to perform.
+- `upload_buffer_minutes` (`integer`, min: 0): Pre- and post-upload FYP browsing buffer (TikTok BloxClips rule).
+- `mandatory_rest_hours` (`number`, min: 0): App closure rest pause for interest-graph clustering (Instagram BloxClips rule).
 
-#### 6. `post_log` Items
+#### 6. `infrastructure`
+- `device_type` (`string`): Device form factor (e.g. `"android_spare"`, `"ios_spare"`).
+- `device_name` (`string`): Hardware model label (e.g. `"OnePlus 9 Pro (LE2123)"`).
+- `sim_removed` (`boolean`): Whether physical cellular SIM is removed to block cell tower MCC/MNC tracking.
+- `gps_disabled` (`boolean`): Whether GPS location services are disabled.
+- `connection_type` (`string`, enum: `["isp_proxy", "vpn", "direct_wifi"]`): Network routing mechanism.
+- `provider` (`string`): Proxy or VPN provider name (e.g. `"MarsProxies"`, `"Proxy-Seller"`, `"NordVPN"`).
+- `proxy_type` (`string`): Proxy protocol / classification (e.g. `"static_isp"`, `"socks5"`, `"http"`).
+- `proxy_ip` (`string`): Static IP address assigned.
+- `proxy_port` (`integer`): Port number.
+- `target_region` (`string`): Geographical audience target region (e.g. `"US"`).
+- `target_timezone` (`string`): Local device timezone aligned with proxy (e.g. `"America/New_York"`).
+- `proxy_expires_at` (`string`): ISO 8601 expiration timestamp.
+- `renewal_alarm_date` (`string`): ISO 8601 warning threshold timestamp (T-3 days).
+- `vpn_kill_switch_verified` (`boolean`): Whether OS-level kill switch is actively enforced.
+
+#### 7. `post_log` Items
 - `clip_id` (`string`, required): Identifier of the published clip package.
 - `project` (`string`): Campaign or project slug (e.g. `"n3on-x-mpj"`).
 - `timestamp` (`string`, required): ISO 8601 publication timestamp.
@@ -309,6 +328,10 @@ The following JSON Schema validates any workspace-level `channels.json`:
           "warmup_protocol": {
             "type": "object",
             "properties": {
+              "strategy": {
+                "type": "string",
+                "description": "Warmup methodology strategy (e.g. 'bloxclips', 'generic')"
+              },
               "daily_actions": {
                 "type": "array",
                 "items": {
@@ -330,7 +353,40 @@ The following JSON Schema validates any workspace-level `channels.json`:
               "target_interactions_per_day": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "upload_buffer_minutes": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Pre- and post-upload FYP browsing buffer in minutes"
+              },
+              "mandatory_rest_hours": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Mandatory app closure break duration for graph clustering"
               }
+            }
+          },
+          "infrastructure": {
+            "type": "object",
+            "description": "Network and physical hardware isolation configuration",
+            "properties": {
+              "device_type": { "type": "string" },
+              "device_name": { "type": "string" },
+              "sim_removed": { "type": "boolean" },
+              "gps_disabled": { "type": "boolean" },
+              "connection_type": {
+                "type": "string",
+                "enum": ["isp_proxy", "vpn", "direct_wifi"]
+              },
+              "provider": { "type": "string" },
+              "proxy_type": { "type": "string" },
+              "proxy_ip": { "type": "string" },
+              "proxy_port": { "type": "integer" },
+              "target_region": { "type": "string" },
+              "target_timezone": { "type": "string" },
+              "proxy_expires_at": { "type": "string" },
+              "renewal_alarm_date": { "type": "string" },
+              "vpn_kill_switch_verified": { "type": "boolean" }
             }
           },
           "post_log": {

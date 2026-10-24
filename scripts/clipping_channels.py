@@ -160,8 +160,57 @@ def _stage_cadence_defaults(stage: str) -> Dict[str, Any]:
     return {"daily_post_limit": 0, "posts_today": 0, "last_post_date": "", "min_post_spacing_hours": 0.0}
 
 
-def _stage_warmup_defaults(stage: str) -> Dict[str, Any]:
+def _stage_warmup_defaults(stage: str, platform: Optional[str] = None) -> Dict[str, Any]:
     if stage == "Cold Lurker":
+        if platform == "TikTok":
+            return {
+                "strategy": "bloxclips",
+                "daily_actions": [
+                    "browse_fyp_natural_scroll_20_25m",
+                    "max_likes_day3_cap_4_to_6",
+                    "genuine_comments_day3_cap_2_to_3",
+                    "no_deliberate_search_or_mass_follows",
+                    "zero_posting_day_1_to_3",
+                    "prepare_upload_buffer_10m_pre_and_post_for_d4",
+                ],
+                "niche_keywords": ["podcast", "motivation", "clips"],
+                "browsing_minutes_per_day": 25,
+                "target_interactions_per_day": 6,
+                "upload_buffer_minutes": 10,
+            }
+        elif platform == "Instagram Reels":
+            return {
+                "strategy": "bloxclips",
+                "daily_actions": [
+                    "phase_1_watch_5_to_10_explore_videos",
+                    "phase_2_select_minimum_3_niche_topics",
+                    "phase_3_niche_search_and_creator_research_10m",
+                    "phase_4_mandatory_1_to_2h_app_closure_break",
+                    "phase_5_reels_feed_curation_skip_non_niche",
+                    "verify_reels_feed_over_50pct_niche_aligned",
+                    "set_professional_creator_account",
+                    "clean_pfp_and_bio_zero_links_during_warmup",
+                ],
+                "niche_keywords": ["podcast", "motivation", "clips"],
+                "browsing_minutes_per_day": 20,
+                "target_interactions_per_day": 5,
+                "mandatory_rest_hours": 1.5,
+            }
+        elif platform == "YouTube Shorts":
+            return {
+                "strategy": "bloxclips",
+                "daily_actions": [
+                    "dedicated_daily_session_30_to_35m",
+                    "competitor_niche_research_and_hook_analysis",
+                    "maintain_single_account_session_stability_no_switching",
+                    "thoughtful_conversational_comments_no_promotions",
+                    "hook_first_editing_preparation_no_greetings",
+                    "verify_audio_mixing_voiceover_clarity",
+                ],
+                "niche_keywords": ["podcast", "motivation", "clips"],
+                "browsing_minutes_per_day": 35,
+                "target_interactions_per_day": 5,
+            }
         return {
             "daily_actions": [
                 "browse_niche_feed",
@@ -174,6 +223,47 @@ def _stage_warmup_defaults(stage: str) -> Dict[str, Any]:
             "target_interactions_per_day": 10,
         }
     elif stage == "Seeding":
+        if platform == "TikTok":
+            return {
+                "strategy": "bloxclips",
+                "daily_actions": [
+                    "pre_upload_fyp_browsing_10m",
+                    "upload_single_test_clip",
+                    "post_upload_fyp_browsing_10m_no_refresh",
+                    "monitor_views_24h_against_health_gate",
+                    "reply_authentically_to_comments",
+                ],
+                "niche_keywords": ["podcast", "motivation", "clips"],
+                "browsing_minutes_per_day": 20,
+                "target_interactions_per_day": 5,
+                "upload_buffer_minutes": 10,
+            }
+        elif platform == "Instagram Reels":
+            return {
+                "strategy": "bloxclips",
+                "daily_actions": [
+                    "reels_feed_engagement_15m",
+                    "post_first_reel_once_feed_over_50pct_niche",
+                    "monitor_views_24h_health_gate",
+                    "zero_external_links_in_bio",
+                ],
+                "niche_keywords": ["podcast", "motivation", "clips"],
+                "browsing_minutes_per_day": 20,
+                "target_interactions_per_day": 5,
+            }
+        elif platform == "YouTube Shorts":
+            return {
+                "strategy": "bloxclips",
+                "daily_actions": [
+                    "dedicated_daily_session_30m",
+                    "post_1_hook_optimized_short",
+                    "monitor_viewed_vs_swiped_target_over_70pct",
+                    "monitor_average_percent_viewed_target_over_85pct",
+                ],
+                "niche_keywords": ["podcast", "motivation", "clips"],
+                "browsing_minutes_per_day": 30,
+                "target_interactions_per_day": 5,
+            }
         return {
             "daily_actions": [
                 "browse_niche_feed",
@@ -294,7 +384,7 @@ def add_channel(
     today_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     cadence = _stage_cadence_defaults(canonical_stage)
-    warmup = _stage_warmup_defaults(canonical_stage)
+    warmup = _stage_warmup_defaults(canonical_stage, canonical_platform)
 
     new_channel: Dict[str, Any] = {
         "id": channel_id,
@@ -404,6 +494,26 @@ def audit_portfolio(directory: Optional[str] = None, output_artifact: Optional[s
         cd = "Active" if chan.get("cooldown", {}).get("in_cooldown") else "None"
         report_lines.append(f"| {cid} | {plat} | {handle} | {stg} | {stat} | {limit} | {today} | {hg} | {cd} |")
 
+    proxy_warnings = []
+    now_utc = datetime.now(timezone.utc)
+    for chan in channels:
+        infra = chan.get("infrastructure", {})
+        exp_str = infra.get("proxy_expires_at")
+        if exp_str:
+            try:
+                exp_dt = datetime.fromisoformat(exp_str)
+                hours_left = (exp_dt - now_utc).total_seconds() / 3600.0
+                if hours_left <= 72:
+                    proxy_warnings.append(f"[WARNING] Dedicated proxy for channel '{chan.get('id')}' expires in {hours_left:.1f} hours! Renew 3 days prior to maintain clean IP reputation.")
+            except Exception:
+                pass
+
+    if proxy_warnings:
+        report_lines.append("")
+        report_lines.append("## Infrastructure & Proxy Sentinel Alerts")
+        for pw in proxy_warnings:
+            report_lines.append(f"- {pw}")
+
     report_text = "\n".join(report_lines)
     print(report_text)
 
@@ -444,13 +554,29 @@ def get_daily_tasks(directory: Optional[str] = None, json_mode: bool = False) ->
         warmup = chan.get("warmup_protocol", {})
         actions = list(warmup.get("daily_actions", []))
         browsing_mins = warmup.get("browsing_minutes_per_day", 0)
+        niche_kw = list(warmup.get("niche_keywords", []))
 
         # Contextual notes
         notes = []
+        strategy = warmup.get("strategy", "")
         if stg == "Cold Lurker":
-            notes.append("Strictly 0 posts allowed. Warmup browsing only to establish algorithmic trust.")
+            if plat == "TikTok":
+                notes.append("BloxClips TikTok Protocol: Strictly 0 posts today (Day 3: 20-25m FYP, max 4-6 likes, 2-3 comments, no deliberate searching). Tomorrow (Day 4) unlocks first test clip with mandatory 10m pre-upload & 10m post-upload FYP browsing buffer (no profile refreshing).")
+            elif plat == "Instagram Reels":
+                notes.append("BloxClips Instagram 5-Phase Training: Watch 5-10 Explore videos -> Select >=3 niche topics -> 10m niche search -> Mandatory 1-2h app closure break -> Reels feed curation until >50% niche-aligned. Ensure Professional account, clean PFP, zero bio links.")
+            elif plat == "YouTube Shorts":
+                notes.append("BloxClips YouTube Engine: Dedicated 30-35m session. Strict single-account session stability (no switching). Competitor hook analysis (first 2-3s payoff, no greetings). Thoughtful conversational comments only.")
+            else:
+                notes.append("Strictly 0 posts allowed. Warmup browsing only to establish algorithmic trust.")
         elif stg == "Seeding":
-            notes.append(f"Post 1 clip ({today}/1 posted). Verify 24h view distribution against Health Gate (>= 200 views).")
+            if plat == "TikTok":
+                notes.append(f"BloxClips TikTok Seeding ({today}/1 posted): 10m FYP browsing before upload -> Post 1 test clip -> 10m FYP browsing after (no refresh). Monitor 24h views against Health Gate (>= 200).")
+            elif plat == "Instagram Reels":
+                notes.append(f"BloxClips Instagram Seeding ({today}/1 posted): Verify feed >50% niche -> Post 1st Reel -> Monitor 24h views (>= 200). Zero bio links.")
+            elif plat == "YouTube Shorts":
+                notes.append(f"BloxClips YouTube Seeding ({today}/1 posted): Post 1 hook-optimized short -> Track viewed vs. swiped (>= 70%) and retention (>= 85%).")
+            else:
+                notes.append(f"Post 1 clip ({today}/1 posted). Verify 24h view distribution against Health Gate (>= 200 views).")
         elif stg == "Ramp-Up":
             notes.append(f"Post up to {limit} clips ({remaining} remaining today). Minimum 2.5h spacing between uploads.")
         elif stg == "Mature":
@@ -469,6 +595,7 @@ def get_daily_tasks(directory: Optional[str] = None, json_mode: bool = False) ->
             "posts_today": today,
             "remaining_posts": remaining,
             "browsing_minutes": browsing_mins,
+            "niche_keywords": niche_kw,
             "actions": actions,
             "guidance": " ".join(notes),
         }
@@ -483,6 +610,8 @@ def get_daily_tasks(directory: Optional[str] = None, json_mode: bool = False) ->
             print(f"- **Stage**: {t['stage']} (Status: {t['status']})")
             print(f"- **Posting Quota**: {t['posts_today']}/{t['daily_post_limit']} posted ({t['remaining_posts']} remaining)")
             print(f"- **Warmup Browsing**: {t['browsing_minutes']} minutes target")
+            if t.get("niche_keywords"):
+                print(f"- **Target Niche Topics**: {', '.join(t['niche_keywords'])}")
             print("- **Actions**:")
             for a in t["actions"]:
                 print(f"  * {a}")
@@ -539,7 +668,10 @@ def advance_stage(
         chan["stage_entered_at"] = now_iso
         chan["posting_cadence"]["daily_post_limit"] = 1
         chan["posting_cadence"]["min_post_spacing_hours"] = 4.0
-        chan["warmup_protocol"] = _stage_warmup_defaults("Seeding")
+        niche_kw = chan.get("warmup_protocol", {}).get("niche_keywords", [])
+        chan["warmup_protocol"] = _stage_warmup_defaults("Seeding", chan.get("platform"))
+        if niche_kw:
+            chan["warmup_protocol"]["niche_keywords"] = niche_kw
         print(f"Advanced channel '{channel_id}' from Cold Lurker to Seeding (daily_post_limit: 1).")
 
     elif current_stage == "Seeding":
@@ -588,7 +720,10 @@ def advance_stage(
         chan["health_gate"]["suppression_detected"] = False
         chan["posting_cadence"]["daily_post_limit"] = 1
         chan["posting_cadence"]["min_post_spacing_hours"] = 4.0
-        chan["warmup_protocol"] = _stage_warmup_defaults("Seeding")
+        niche_kw = chan.get("warmup_protocol", {}).get("niche_keywords", [])
+        chan["warmup_protocol"] = _stage_warmup_defaults("Seeding", chan.get("platform"))
+        if niche_kw:
+            chan["warmup_protocol"]["niche_keywords"] = niche_kw
         print(f"Channel '{channel_id}' exited Account Cooldown and returned to Seeding.")
 
     elif current_stage == "Mature":

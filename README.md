@@ -12,7 +12,7 @@
 
 The pipeline unifies two proven frameworks:
 1. **Cole Corcoran's AI Clipping Framework**: Strict Hook $\rightarrow$ Story $\rightarrow$ Payoff architecture, dead-air pruning ($>0.4$s), kinetic word-by-word subtitles, Tier-1 audience targeting ($\ge 40\%$ US/UK/CA), and 30-minute Whop submission compliance.
-2. **Storyteller FilmCraft 8-Subagent Pipeline**: Gated modular execution where each editing and distribution step receives isolated, pre-digested configuration slices, strictly controlled by a deterministic state engine.
+2. **Remotion & HyperFrames 8-Subagent Pipeline**: Gated modular execution where each editing and distribution step receives isolated, pre-digested configuration slices, assembling vertical timelines in Remotion (`.remotion.json` + React/TypeScript compositions) and kinetic HTML/CSS/GSAP overlays in HyperFrames, strictly controlled by a deterministic state engine.
 
 ---
 
@@ -66,9 +66,9 @@ The pipeline executes as a sequential, gated 8-step process. Downstream editing 
 
 ### The 8 Steps:
 1. **`clipping-guidelines`**: Ingests campaign briefs, enforces non-negotiables, injects Tier-1 defaults (`[Default Applied]`), and produces a user approval artifact.
-2. **`clipping-transcription`**: Generates diarized transcription with word timestamps and phonetic fixes.
+2. **`clipping-transcription`**: Acquires source footage via `yt-dlp`, generates hardware-accelerated proxy (VAAPI/NVENC/VideoToolbox/CPU) per [ADR 0011](docs/adr/0011-hardware-accelerated-proxy-generation.md), extracts dialogue audio, generates diarized transcription with word timestamps, and generates timestamped visual contact sheets.
 3. **`clipping-hook-hunter`**: Ranks viral hooks and defines the 0–3s hook snippet and curiosity loops.
-4. **`clipping-assembly`**: Sets up 9:16 vertical canvas, speaker framing, and removes dead air $>0.4$s (preserving 80ms consonant buffers).
+4. **`clipping-assembly`**: Sets up 9:16 vertical canvas, speaker framing, attaches hardware proxy for instant scrubbing per [ADR 0011](docs/adr/0011-hardware-accelerated-proxy-generation.md), and removes dead air $>0.4$s (preserving 80ms consonant buffers).
 5. **`clipping-captions`**: Renders high-contrast kinetic subtitles placed clear of mobile UI overlays.
 6. **`clipping-vfx-sfx`**: Enforces persistent watermark placement and adds punctuation sound design without speech clashing.
 7. **`clipping-qc-packager`**: Performs compliance audit (loudness, closers, metadata) and generates ready-to-post packages within the 30-minute Whop submission window (decoupled from channel distribution per ADR 0010).
@@ -138,6 +138,21 @@ python3 scripts/clipping_publisher.py publish \
   --project-dir /path/to/project
 ```
 
+### 4. Source Downloader & Hardware Proxy Engine (`scripts/download_source.py` & `scripts/generate_proxy.py`)
+
+Acquires source video from campaign briefs via `yt-dlp` and immediately chains hardware-accelerated proxy generation (H.264 half-res, 1s GOP, 0 B-frames) per [ADR 0011](docs/adr/0011-hardware-accelerated-proxy-generation.md) for instant scrubbing in Remotion Studio:
+
+```bash
+# Download source video from brief and automatically generate hardware proxy
+python3 scripts/download_source.py --dir /path/to/project
+
+# Generate proxy for existing raw video file
+python3 scripts/generate_proxy.py generate --input /path/to/project/raw/source.mp4 --dir /path/to/project
+
+# Probe host hardware acceleration encoders (VAAPI, NVENC, VideoToolbox, QSV, CPU)
+python3 scripts/generate_proxy.py probe-hw
+```
+
 ---
 
 ## Installation
@@ -172,6 +187,10 @@ clipping-pipeline/
 │   ├── clipping_state.py       # State engine CLI & pre-flight gate validator
 │   ├── clipping_channels.py    # Channel portfolio & warmup management engine
 │   ├── clipping_publisher.py   # Multi-platform publishing engine (Step 8)
+│   ├── clipping_assembly.py    # Native 9:16 vertical assembly & .remotion.json builder
+│   ├── download_source.py      # Source video downloader & proxy pipeline bridge
+│   ├── generate_proxy.py       # Hardware-accelerated proxy generator (VAAPI/NVENC/CPU)
+│   ├── generate_contact_sheets.py # Multi-grid visual contact sheet generator
 │   └── ingest_guidelines.py    # Guidelines normalizer & review artifact generator
 ├── references/
 │   ├── CAMPAIGN_BRIEF_SCHEMA.md    # Normalized schema specification & JSON schema
@@ -195,6 +214,9 @@ clipping-pipeline/
     ├── test_channels.py                # Channel portfolio CLI test suite
     ├── test_channel_schema.py          # Channel schema validator test suite
     ├── test_channels_skill.py          # Channel companion skill test suite
+    ├── test_clipping_assembly.py       # Assembly & proxy linking test suite
+    ├── test_generate_proxy.py          # Hardware acceleration & proxy test suite
+    ├── test_download_source.py         # Source downloader & proxy bridge test suite
     └── test_e2e_publishing_pipeline.py # End-to-end 8-step pipeline test suite
 ```
 

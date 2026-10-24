@@ -1,0 +1,232 @@
+{
+  "version": "1.0.0",
+  "updated_at": "2026-10-24T04:57:44.556800+00:00",
+  "workspace_id": "clipping-pipeline",
+  "default_device_transfer": {
+    "protocol": "adb_push",
+    "target": "/sdcard/DCIM/Camera/",
+    "enabled": true
+  },
+  "channels": [
+    {
+      "id": "chan-instagram-reels-01",
+      "platform": "Instagram Reels",
+      "handle": "@cutt.yclips",
+      "account_name": "Cuttyclips",
+      "creation_date": "2026-10-20",
+      "stage": "Seeding",
+      "status": "active",
+      "stage_entered_at": "2026-10-23T08:09:51.255946+00:00",
+      "posting_cadence": {
+        "daily_post_limit": 1,
+        "posts_today": 1,
+        "last_post_date": "2026-10-24T04:57:44.556779+00:00",
+        "min_post_spacing_hours": 4.0
+      },
+      "health_gate": {
+        "cleared_health_gate": false,
+        "min_views_threshold": 200,
+        "max_views_threshold": 500,
+        "latest_views": 126,
+        "consecutive_valid_posts": 0,
+        "suppression_detected": false
+      },
+      "cooldown": {
+        "in_cooldown": false,
+        "cooldown_duration_hours": 72
+      },
+      "device_transfer": {
+        "protocol": "adb_push",
+        "target": "/sdcard/DCIM/Camera/",
+        "enabled": true
+      },
+      "warmup_protocol": {
+        "strategy": "bloxclips",
+        "daily_actions": [
+          "reels_feed_engagement_15m",
+          "post_first_reel_once_feed_over_50pct_niche",
+          "monitor_views_24h_health_gate",
+          "zero_external_links_in_bio"
+        ],
+        "niche_keywords": [
+          "basketball cards",
+          "nba cards",
+          "sports cards",
+          "card collection",
+          "pack opening",
+          "card collecting",
+          "hobby box",
+          "panini prizm",
+          "psa grading",
+          "1 of 1"
+        ],
+        "browsing_minutes_per_day": 20,
+        "target_interactions_per_day": 5
+      },
+      "post_log": [
+        {
+          "clip_id": "hardscope-unpacked-episode-2-clip-01",
+          "timestamp": "2026-10-24T04:57:44.556779+00:00",
+          "project": "hardscope-unpacked-episode-2",
+          "views": 126
+        }
+      ],
+      "infrastructure": {
+        "device_type": "android_spare",
+        "device_name": "Samsung Galaxy A02s (SM-A025F)",
+        "sim_removed": true,
+        "gps_disabled": true,
+        "connection_type": "vpn",
+        "provider": "NordVPN",
+        "target_region": "US",
+        "target_timezone": "America/New_York",
+        "vpn_kill_switch_verified": true
+      }
+    },
+    {
+      "id": "chan-tiktok-01",
+      "platform": "TikTok",
+      "handle": "@whereare.myclips",
+      "account_name": "Whereare Myclips",
+      "creation_date": "2026-10-20",
+      "stage": "Seeding",
+      "status": "active",
+      "stage_entered_at": "2026-10-23T08:09:51.595467+00:00",
+      "posting_cadence": {
+        "daily_post_limit": 1,
+        "posts_today": 1,
+        "last_post_date": "2026-10-24T04:57:44.265531+00:00",
+        "min_post_spacing_hours": 4.0
+      },
+      "health_gate": {
+        "cleared_health_gate": false,
+        "min_views_threshold": 200,
+        "max_views_threshold": 500,
+        "latest_views": 258,
+        "consecutive_valid_posts": 1,
+        "suppression_detected": false
+      },
+      "cooldown": {
+        "in_cooldown": false,
+        "cooldown_duration_hours": 72
+      },
+      "device_transfer": {
+        "protocol": "adb_push",
+        "target": "/sdcard/DCIM/Camera/",
+        "enabled": true
+      },
+      "warmup_protocol": {
+        "strategy": "bloxclips",
+        "daily_actions": [
+          "pre_upload_fyp_browsing_10m",
+          "upload_single_test_clip",
+          "post_upload_fyp_browsing_10m_no_refresh",
+          "monitor_views_24h_against_health_gate",
+          "reply_authentically_to_comments"
+        ],
+        "niche_keywords": [
+          "basketball cards",
+          "nba cards",
+          "sports cards",
+          "card collection",
+          "pack opening",
+          "card collecting",
+          "hobby box",
+          "panini prizm",
+          "psa grading",
+          "1 of 1"
+        ],
+        "browsing_minutes_per_day": 20,
+        "target_interactions_per_day": 5,
+        "upload_buffer_minutes": 10
+      },
+      "post_log": [
+        {
+          "clip_id": "hardscope-unpacked-episode-2-clip-01",
+          "timestamp": "2026-10-24T04:57:44.265531+00:00",
+          "project": "hardscope-unpacked-episode-2",
+          "views": 258
+        }
+      ],
+      "infrastructure": {
+        "device_type": "android_spare",
+        "device_name": "Samsung Galaxy A02s (SM-A025F)",
+        "sim_removed": true,
+        "gps_disabled": true,
+        "connection_type": "vpn",
+        "provider": "NordVPN",
+        "target_region": "US",
+        "target_timezone": "America/New_York",
+        "vpn_kill_switch_verified": true
+      }
+    },
+    {
+      "id": "chan-youtube-shorts-01",
+      "platform": "YouTube Shorts",
+      "handle": "@surunreal",
+      "account_name": "surunreal clips",
+      "creation_date": "2026-10-20",
+      "stage": "Seeding",
+      "status": "active",
+      "stage_entered_at": "2026-10-23T08:09:51.869425+00:00",
+      "posting_cadence": {
+        "daily_post_limit": 1,
+        "posts_today": 0,
+        "last_post_date": "",
+        "min_post_spacing_hours": 4.0
+      },
+      "health_gate": {
+        "cleared_health_gate": false,
+        "min_views_threshold": 200,
+        "max_views_threshold": 500,
+        "latest_views": 0,
+        "consecutive_valid_posts": 0,
+        "suppression_detected": false
+      },
+      "cooldown": {
+        "in_cooldown": false,
+        "cooldown_duration_hours": 72
+      },
+      "device_transfer": {
+        "protocol": "adb_push",
+        "target": "/sdcard/DCIM/Camera/",
+        "enabled": true
+      },
+      "warmup_protocol": {
+        "strategy": "bloxclips",
+        "daily_actions": [
+          "dedicated_daily_session_30m",
+          "post_1_hook_optimized_short",
+          "monitor_viewed_vs_swiped_target_over_70pct",
+          "monitor_average_percent_viewed_target_over_85pct"
+        ],
+        "niche_keywords": [
+          "basketball cards",
+          "nba cards",
+          "sports cards",
+          "card collection",
+          "pack opening",
+          "card collecting",
+          "hobby box",
+          "panini prizm",
+          "psa grading",
+          "1 of 1"
+        ],
+        "browsing_minutes_per_day": 30,
+        "target_interactions_per_day": 5
+      },
+      "post_log": [],
+      "infrastructure": {
+        "device_type": "android_spare",
+        "device_name": "Samsung Galaxy A02s (SM-A025F)",
+        "sim_removed": true,
+        "gps_disabled": true,
+        "connection_type": "vpn",
+        "provider": "NordVPN",
+        "target_region": "US",
+        "target_timezone": "America/New_York",
+        "vpn_kill_switch_verified": true
+      }
+    }
+  ]
+}

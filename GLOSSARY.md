@@ -125,7 +125,7 @@ The deterministic pairing between a Variation Profile and a specific channel in 
 _Avoid_: Channel assignment, post binding, account targeting
 
 **Live GUI Companion**:
-A persistent background desktop process of FilmCraft (`filmcraft --control <port>`) or EffectCraft running alongside the agent during pipeline execution, providing real-time visual playback and timeline inspection.
+A persistent background desktop process of Remotion Studio or HyperFrames Preview (`scripts/gui_companion.py`) running alongside the agent during pipeline execution, providing real-time visual playback and timeline inspection.
 _Avoid_: External editor, desktop viewer, GUI watcher
 
 **Feedback Checkpoint**:
@@ -137,9 +137,17 @@ The automated extraction and persistent storage of human editorial preferences d
 _Avoid_: Feedback recording, preference saving, preference capture
 
 **Project Diffing Heuristic**:
-The differential analysis of `.fcproj` and `.ecproj` project files comparing user-edited project files against agent-generated project baselines to detect and encode editorial preferences.
+The differential analysis of `.remotion.json` and `.hyperframes.html` project files comparing user-edited project files against agent-generated project baselines to detect and encode editorial preferences.
 _Avoid_: Project comparison, file diffing, timeline diff
 
 **Preference Store**:
 The 3-tier hierarchical JSON configuration storage (`.clipping_preferences.json` project-level, `campaign_brief.json` campaign-level, and `~/.config/clipping-pipeline/preferences.json` user-level) governing editing parameters across pipeline runs.
 _Avoid_: Settings file, preference cache, config store
+
+**Video Proxy**:
+A lightweight, fast-decoding edit copy of the high-resolution source video (typically half-resolution, e.g. 960×540, H.264, 1-second keyframe GOP interval, zero B-frames) stored in `raw/Proxies/<stem>_Proxy.mp4` per [ADR 0011](docs/adr/0011-hardware-accelerated-proxy-generation.md) for smooth scrubbing and timeline inspection in Remotion Studio without altering final master export resolution.
+_Avoid_: Preview file, low-res copy, thumbnail video, draft video
+
+**Hardware-Accelerated Proxy Generation**:
+The offloading of video scaling and H.264 compression to host graphics hardware silicon (Linux VAAPI via `/dev/dri/renderD128`, NVIDIA NVENC, Apple Silicon VideoToolbox, or Intel QSV) per [ADR 0011](docs/adr/0011-hardware-accelerated-proxy-generation.md), with automatic fallback to CPU (`libx264 -preset veryfast`).
+_Avoid_: GPU transcode, hardware encode, fast rendering
